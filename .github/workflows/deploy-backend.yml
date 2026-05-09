@@ -32,11 +32,11 @@ jobs:
         with:
           project: ${{ secrets.GCP_PROJECT_ID }}
 
-      # Fail fast with a clear error before wasting time building Docker image
-      - name: Verify project access
+      # Fail fast before wasting time on the Docker build
+      - name: Verify Artifact Registry access
         run: |
-          gcloud projects describe ${{ secrets.GCP_PROJECT_ID }} \
-            --format='value(name)' \
+          gcloud artifacts repositories list \
+            --location=${{ env.REGION }} \
             --project=${{ secrets.GCP_PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
