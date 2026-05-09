@@ -26,11 +26,23 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project: ${{ secrets.GCP_PROJECT_ID }}
+
+      # Fail fast with a clear error before wasting time building Docker image
+      - name: Verify project access
+        run: |
+          gcloud projects describe ${{ secrets.GCP_PROJECT_ID }} \
+            --format='value(name)' \
+            --project=${{ secrets.GCP_PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev \
+            --project=${{ secrets.GCP_PROJECT_ID }} --quiet
 
       - name: Build and push image
         run: |
@@ -44,6 +56,7 @@ jobs:
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE" \
             --region ${{ env.REGION }} \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
             --platform managed \
             --memory 2Gi \
             --cpu 1 \
@@ -59,6 +72,7 @@ jobs:
         run: |
           URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
             --region ${{ env.REGION }} \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
             --format 'value(status.url)')
           echo "Backend live at: $URL"
           echo "Set BACKEND_URL=$URL on Vercel for the frontend."
