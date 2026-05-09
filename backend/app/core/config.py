@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     scraper_timeout_ms: int = 30_000      # per-page timeout
     scraper_mock_mode: bool = False       # set True for local dev without Futu access
 
+    # CORS — comma-separated list of allowed origins, or * for all
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     # Scheduler — nightly price update (24h clock, ET)
     nightly_update_hour: int = 18
     nightly_update_minute: int = 0

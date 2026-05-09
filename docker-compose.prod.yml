@@ -4,9 +4,7 @@ services:
     environment:
       POSTGRES_DB: sfm
       POSTGRES_USER: sfm
-      POSTGRES_PASSWORD: sfm
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sfm}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -14,38 +12,41 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://sfm:sfm@db:5432/sfm
+      DATABASE_URL: postgresql+asyncpg://sfm:${POSTGRES_PASSWORD:-sfm}@db:5432/sfm
+      CORS_ORIGINS: "*"
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
+      args:
+        NEXT_PUBLIC_API_URL: ""
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
       BACKEND_URL: http://backend:8000
     depends_on:
       - backend
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
-    command: pnpm dev
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+    restart: unless-stopped
 
 volumes:
   postgres_data:
