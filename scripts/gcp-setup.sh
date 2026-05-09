@@ -9,6 +9,21 @@ read -rp "GCP Project ID: " PROJECT_ID
 read -rp "Region [us-central1]: " REGION
 REGION="${REGION:-us-central1}"
 
+# Sanitize project ID input (trim spaces and optional surrounding quotes)
+PROJECT_ID="${PROJECT_ID#"${PROJECT_ID%%[![:space:]]*}"}"
+PROJECT_ID="${PROJECT_ID%"${PROJECT_ID##*[![:space:]]}"}"
+if [[ "$PROJECT_ID" == \"*\" && "$PROJECT_ID" == *\" ]]; then
+  PROJECT_ID="${PROJECT_ID:1:${#PROJECT_ID}-2}"
+fi
+if [[ "$PROJECT_ID" == \'*\' && "$PROJECT_ID" == *\' ]]; then
+  PROJECT_ID="${PROJECT_ID:1:${#PROJECT_ID}-2}"
+fi
+
+if [[ -z "$PROJECT_ID" ]]; then
+  echo "Error: GCP Project ID is required."
+  exit 1
+fi
+
 SA_NAME="github-actions-sfm"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 REPO="sfm"
