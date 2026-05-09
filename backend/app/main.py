@@ -1,22 +1,32 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import create_tables
+from app.core.database import create_tables, async_session
 from app.api.routes import refresh as refresh_router
 
+logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone="US/Eastern")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup — skip DB when mock mode is on (no PostgreSQL needed)
     if not settings.scraper_mock_mode:
-        await create_tables()
+        try:
+            await asyncio.wait_for(create_tables(), timeout=30)
+        except asyncio.TimeoutError:
+            logger.error("DB create_tables timed out after 30s — check DATABASE_URL")
+            raise
+        except Exception as exc:
+            logger.error("DB create_tables failed: %s", exc)
+            raise
 
         from app.services.historical import update_all_known_symbols
         scheduler.add_job(
@@ -31,7 +41,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
     if scheduler.running:
         scheduler.shutdown(wait=False)
 
@@ -50,4 +59,11 @@ app.include_router(refresh_router.router, prefix="/api/v1")
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    if settings.scraper_mock_mode:
+        return {"status": "ok"}
+    try:
+        async with async_session() as session:
+            await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=5)
+        return {"status": "ok"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
