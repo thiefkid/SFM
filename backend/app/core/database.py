@@ -19,7 +19,14 @@ _is_local = _parsed.hostname in (None, "localhost", "127.0.0.1", "::1")
 _db_url = urlunparse(_parsed._replace(query=""))
 _connect_args: dict = {} if _is_local else {"ssl": "require"}
 
-engine = create_async_engine(_db_url, echo=False, pool_pre_ping=True, connect_args=_connect_args)
+engine = create_async_engine(
+    _db_url,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=60,    # recycle connections after 60s to avoid Neon idle drops
+    pool_timeout=30,
+    connect_args=_connect_args,
+)
 async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(
     engine, expire_on_commit=False
 )

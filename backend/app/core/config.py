@@ -14,9 +14,9 @@ class Settings(BaseSettings):
 
     # Scraper settings
     playwright_headless: bool = True
-    scraper_concurrency: int = 1          # kept for reference; scraping is now sequential
-    scraper_timeout_ms: int = 45_000      # per-page timeout (raised to survive slow Futu responses)
-    scraper_delay_s: float = 1.5          # delay between sequential stock page requests
+    scraper_concurrency: int = 2          # max concurrent Playwright pages (semaphore)
+    scraper_timeout_ms: int = 25_000      # per-page timeout
+    scraper_delay_s: float = 0.5          # delay after each page finishes (bot-evasion spacing)
     scraper_mock_mode: bool = False       # set True for local dev without Futu access
 
     # CORS — comma-separated list of allowed origins, or * for all
