@@ -14,8 +14,9 @@ class Settings(BaseSettings):
 
     # Scraper settings
     playwright_headless: bool = True
-    scraper_concurrency: int = 5          # max parallel stock pages
-    scraper_timeout_ms: int = 30_000      # per-page timeout
+    scraper_concurrency: int = 1          # kept for reference; scraping is now sequential
+    scraper_timeout_ms: int = 45_000      # per-page timeout (raised to survive slow Futu responses)
+    scraper_delay_s: float = 1.5          # delay between sequential stock page requests
     scraper_mock_mode: bool = False       # set True for local dev without Futu access
 
     # CORS — comma-separated list of allowed origins, or * for all

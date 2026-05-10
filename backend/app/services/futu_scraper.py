@@ -123,9 +123,30 @@ class FutuScraper:
             pw = await async_playwright().start()
             self._browser = await pw.chromium.launch(
                 headless=settings.playwright_headless,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                ],
             )
         return self._browser
+
+    async def _new_page(self):
+        browser = await self._get_browser()
+        page = await browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        # Hide webdriver flag that sites use to detect headless browsers
+        await page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
+        return page
 
     async def close(self) -> None:
         if self._browser:
@@ -141,8 +162,7 @@ class FutuScraper:
         if settings.scraper_mock_mode:
             return list(_MOCK_SYMBOLS)
 
-        browser = await self._get_browser()
-        page = await browser.new_page()
+        page = await self._new_page()
         try:
             await page.goto(settings.futu_most_active_url, timeout=settings.scraper_timeout_ms)
 
@@ -206,8 +226,7 @@ class FutuScraper:
         if settings.scraper_mock_mode:
             return _MOCK_STOCKS.get(symbol, _make_fallback_snapshot(symbol))
 
-        browser = await self._get_browser()
-        page = await browser.new_page()
+        page = await self._new_page()
         try:
             url = settings.futu_stock_base_url.format(symbol=symbol)
             await page.goto(url, timeout=settings.scraper_timeout_ms)
@@ -281,22 +300,19 @@ class FutuScraper:
             await page.close()
 
     async def get_all_snapshots(self, symbols: list[str]) -> list[StockSnapshot]:
-        """Scrape all stock pages concurrently (max 5 at a time)."""
-        semaphore = asyncio.Semaphore(settings.scraper_concurrency)
-
-        async def _fetch(symbol: str) -> StockSnapshot:
-            async with semaphore:
-                return await self.get_stock_snapshot(symbol)
-
-        return await asyncio.gather(*[_fetch(s) for s in symbols])
+        """Scrape stock pages sequentially with a small delay to avoid bot detection."""
+        results = []
+        for symbol in symbols:
+            results.append(await self.get_stock_snapshot(symbol))
+            await asyncio.sleep(settings.scraper_delay_s)
+        return results
 
     async def get_nasdaq_snapshot(self) -> NasdaqSnapshot:
         """Scrape NASDAQ composite index data from Futu."""
         if settings.scraper_mock_mode:
             return _MOCK_NASDAQ
 
-        browser = await self._get_browser()
-        page = await browser.new_page()
+        page = await self._new_page()
         try:
             url = "https://www.futunn.com/en/stock/.IXIC-US"
             await page.goto(url, timeout=settings.scraper_timeout_ms)
