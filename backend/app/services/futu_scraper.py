@@ -144,7 +144,6 @@ class FutuScraper:
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
         )
-        # Hide webdriver flag that sites use to detect headless browsers
         await page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
         return page
 
@@ -165,8 +164,6 @@ class FutuScraper:
         page = await self._new_page()
         try:
             await page.goto(settings.futu_most_active_url, timeout=settings.scraper_timeout_ms)
-
-            # Wait for the ranking table rows to appear, then let the SPA settle
             try:
                 await page.wait_for_selector("a[href*='/en/stock/']", timeout=settings.scraper_timeout_ms)
                 await page.wait_for_load_state("networkidle", timeout=15_000)
@@ -174,7 +171,6 @@ class FutuScraper:
                 await page.wait_for_load_state("load", timeout=settings.scraper_timeout_ms)
                 await page.wait_for_timeout(3_000)
 
-            # Wait until at least 10 stock links are present in the DOM
             try:
                 await page.wait_for_function(
                     "() => document.querySelectorAll('a[href*=\"/en/stock/\"]').length >= 10",
@@ -183,8 +179,7 @@ class FutuScraper:
             except Exception:
                 pass
 
-            # Grab stock links from the main content area only, skipping nav/header.
-            # Falls back to all links if the main-content selector doesn't match.
+            # Scope to main content to avoid nav/sidebar links
             links = await page.evaluate("""
                 () => {
                     const PATTERN = /\\/en\\/stock\\/[A-Z]+-US/;
@@ -230,19 +225,28 @@ class FutuScraper:
         try:
             url = settings.futu_stock_base_url.format(symbol=symbol)
             await page.goto(url, timeout=settings.scraper_timeout_ms)
+            # Wait for the live price element to appear
             try:
                 await page.wait_for_selector("[class*='price-current']", timeout=settings.scraper_timeout_ms)
             except Exception:
                 await page.wait_for_load_state("load", timeout=settings.scraper_timeout_ms)
 
+            # Futu stock page structure (verified May 2026):
+            # Live price: <ul class="price-current"><li class="price direct-up/down">411.79</li>...</ul>
+            # disc-price shows the regular-session close only; price-current inner .price is always live
+            # Stats grid: each .card-item has [value_child, label_child]
             data: dict = await page.evaluate("""
                 () => {
                     const result = {};
+
+                    // RT price — inner .price child of price-current (live; includes after-hours)
                     const curr = document.querySelector('[class*="price-current"]');
                     if (curr) {
                         const inner = curr.querySelector('[class*="price"]');
                         result.rt_price = (inner || curr).textContent.trim().split('\\n')[0].trim();
                     }
+
+                    // Stats grid: each .card-item has [value_child, label_child]
                     const labelMap = {
                         'Open':        'open',
                         'Prev Close':  'prev_close',
@@ -300,12 +304,16 @@ class FutuScraper:
             await page.close()
 
     async def get_all_snapshots(self, symbols: list[str]) -> list[StockSnapshot]:
-        """Scrape stock pages sequentially with a small delay to avoid bot detection."""
-        results = []
-        for symbol in symbols:
-            results.append(await self.get_stock_snapshot(symbol))
-            await asyncio.sleep(settings.scraper_delay_s)
-        return results
+        """Scrape stock pages with limited concurrency to avoid bot detection."""
+        sem = asyncio.Semaphore(settings.scraper_concurrency)
+
+        async def _fetch(symbol: str) -> StockSnapshot:
+            async with sem:
+                result = await self.get_stock_snapshot(symbol)
+                await asyncio.sleep(settings.scraper_delay_s)
+                return result
+
+        return list(await asyncio.gather(*[_fetch(s) for s in symbols]))
 
     async def get_nasdaq_snapshot(self) -> NasdaqSnapshot:
         """Scrape NASDAQ composite index data from Futu."""
@@ -314,6 +322,7 @@ class FutuScraper:
 
         page = await self._new_page()
         try:
+            # Futu NASDAQ composite index page (correct URL: .IXIC-US not IXIC-US)
             url = "https://www.futunn.com/en/stock/.IXIC-US"
             await page.goto(url, timeout=settings.scraper_timeout_ms)
             try:
@@ -325,6 +334,7 @@ class FutuScraper:
                     await page.wait_for_load_state("load", timeout=settings.scraper_timeout_ms)
                     await page.wait_for_timeout(3000)
 
+            # price-current container holds the live index level; card-items hold Open/Prev Close
             data: dict = await page.evaluate("""
                 () => {
                     const result = {};
@@ -343,8 +353,10 @@ class FutuScraper:
                             if (key && !result[key]) result[key] = value;
                         }
                     }
+                    // RT level — price-current element (Futu index pages, verified May 2026)
                     const curr = document.querySelector('[class*="price-current"]');
                     if (curr) {
+                        // Inner .price child has just the number; fallback to first line of text
                         const inner = curr.querySelector('[class*="price"]');
                         const raw = (inner || curr).textContent.trim();
                         result.rt_level = raw.split('\\n')[0].trim();
