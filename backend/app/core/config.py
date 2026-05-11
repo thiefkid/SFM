@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     scraper_delay_s: float = 0.5          # delay after each page finishes (bot-evasion spacing)
     scraper_mock_mode: bool = False       # set True for local dev without Futu access
 
+    # Finnhub — used for per-stock quotes (price/open/high/low/prev_close)
+    finnhub_api_key: str = ""
+
     # CORS — comma-separated list of allowed origins, or * for all
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

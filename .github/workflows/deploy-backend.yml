@@ -64,7 +64,7 @@ jobs:
             --max-instances 2 \
             --timeout 300s \
             --port 8000 \
-            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},CORS_ORIGINS=*" \
+            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},CORS_ORIGINS=*,FINNHUB_API_KEY=${{ secrets.FINNHUB_API_KEY }}" \
             --allow-unauthenticated \
             --quiet
 
