@@ -163,7 +163,7 @@ class FutuScraper:
 
         page = await self._new_page()
         try:
-            await page.goto(settings.futu_most_active_url, timeout=settings.scraper_timeout_ms)
+            await page.goto(settings.futu_most_active_url, timeout=settings.scraper_timeout_ms, wait_until="domcontentloaded")
             try:
                 await page.wait_for_selector("a[href*='/en/stock/']", timeout=settings.scraper_timeout_ms)
                 await page.wait_for_load_state("networkidle", timeout=15_000)
@@ -224,7 +224,7 @@ class FutuScraper:
         page = await self._new_page()
         try:
             url = settings.futu_stock_base_url.format(symbol=symbol)
-            await page.goto(url, timeout=settings.scraper_timeout_ms)
+            await page.goto(url, timeout=settings.scraper_timeout_ms, wait_until="domcontentloaded")
             # Wait for the live price element to appear
             try:
                 await page.wait_for_selector("[class*='price-current']", timeout=settings.scraper_timeout_ms)
@@ -324,7 +324,7 @@ class FutuScraper:
         try:
             # Futu NASDAQ composite index page (correct URL: .IXIC-US not IXIC-US)
             url = "https://www.futunn.com/en/stock/.IXIC-US"
-            await page.goto(url, timeout=settings.scraper_timeout_ms)
+            await page.goto(url, timeout=settings.scraper_timeout_ms, wait_until="domcontentloaded")
             try:
                 await page.wait_for_selector("[class*='price-current']", timeout=settings.scraper_timeout_ms)
             except Exception:
