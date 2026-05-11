@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.services import indicators as ind_engine
 from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
+from app.services import quotes as quote_service
 from app.services.historical import (
     ATHResult, PastValuesResult, YearHighResult,
     ensure_seeded, get_ath, get_past_values, get_year_high,
@@ -185,9 +186,9 @@ async def refresh() -> RefreshResponse:
     if not symbols:
         raise HTTPException(status_code=502, detail="Failed to fetch candidates from Futu")
 
-    # Step 2: scrape stock pages + NASDAQ concurrently
-    snapshots_task = scraper.get_all_snapshots(symbols)
-    nasdaq_task = scraper.get_nasdaq_snapshot()
+    # Step 2: fetch quotes (Finnhub) + NASDAQ (yfinance) concurrently
+    snapshots_task = quote_service.get_all_snapshots(symbols)
+    nasdaq_task = quote_service.get_nasdaq_snapshot()
     snapshots, nasdaq = await asyncio.gather(snapshots_task, nasdaq_task)
 
     # Step 3+4: seed history + compute indicators for each symbol
