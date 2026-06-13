@@ -294,12 +294,7 @@ class FutuScraper:
                 error=error,
             )
         except Exception as exc:
-            return StockSnapshot(
-                symbol=symbol,
-                rt_price=0.0, open_price=0.0, prev_close=0.0,
-                today_high=0.0, today_low=0.0, today_value=0.0,
-                error=str(exc),
-            )
+            return _make_fallback_snapshot(symbol, str(exc))
         finally:
             await page.close()
 
@@ -383,10 +378,10 @@ class FutuScraper:
 scraper = FutuScraper()
 
 
-def _make_fallback_snapshot(symbol: str) -> StockSnapshot:
+def _make_fallback_snapshot(symbol: str, error: str = "No mock data available for symbol") -> StockSnapshot:
     return StockSnapshot(
         symbol=symbol,
         rt_price=0.0, open_price=0.0, prev_close=0.0,
         today_high=0.0, today_low=0.0, today_value=0.0,
-        error="No mock data available for symbol",
+        error=error,
     )

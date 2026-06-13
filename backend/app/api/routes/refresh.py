@@ -191,6 +191,9 @@ async def refresh() -> RefreshResponse:
     nasdaq_task = quote_service.get_nasdaq_snapshot()
     snapshots, nasdaq = await asyncio.gather(snapshots_task, nasdaq_task)
 
+    if all(s.error for s in snapshots):
+        raise HTTPException(status_code=502, detail=f"All quote fetches failed: {snapshots[0].error}")
+
     # Step 3+4: seed history + compute indicators for each symbol
     tasks = [
         _process_symbol(snap.symbol, snap, nasdaq)
