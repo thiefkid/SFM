@@ -159,12 +159,17 @@ async def _get_nasdaq() -> NasdaqSnapshot:
     per-stock Finnhub quotes. yfinance fast_info is ~15 min delayed, so it's
     kept only as a backstop when the Futu scrape fails or yields an empty level.
     """
+    import logging
+    log = logging.getLogger(__name__)
     try:
         snap = await scraper.get_nasdaq_snapshot()
-        if snap.error is None and snap.rt_level > 0:
+        log.info("Futu NASDAQ: rt=%.2f open=%.2f prev=%.2f err=%s",
+                 snap.rt_level, snap.open_level, snap.prev_close, snap.error)
+        if snap.rt_level > 0:
             return snap
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Futu NASDAQ scrape exception: %s", exc)
+    log.info("Falling back to yfinance for NASDAQ")
     return await quote_service.get_nasdaq_snapshot()
 
 
@@ -205,15 +210,17 @@ async def refresh() -> RefreshResponse:
     """
     global _last_result
 
-    # Step 1: get candidates
+    # Step 1: get candidates (Futu scrape — Playwright browser starts here)
     symbols = await scraper.get_top_active_symbols()
     if not symbols:
         raise HTTPException(status_code=502, detail="Failed to fetch candidates from Futu")
 
-    # Step 2: fetch quotes (Finnhub) + NASDAQ (Futu live, yfinance fallback) concurrently
-    snapshots_task = quote_service.get_all_snapshots(symbols)
-    nasdaq_task = _get_nasdaq()
-    snapshots, nasdaq = await asyncio.gather(snapshots_task, nasdaq_task)
+    # Step 1b: NASDAQ from Futu while the browser is still warm (sequential,
+    # same Playwright instance). Falls back to yfinance if the scrape fails.
+    nasdaq = await _get_nasdaq()
+
+    # Step 2: fetch quotes (Finnhub) concurrently — no Playwright needed
+    snapshots = await quote_service.get_all_snapshots(symbols)
 
     if all(s.error for s in snapshots):
         raise HTTPException(status_code=502, detail=f"All quote fetches failed: {snapshots[0].error}")
