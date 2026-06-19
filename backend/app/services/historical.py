@@ -222,6 +222,15 @@ async def get_ath_status(
 
         prior = await _max_high_before(session, symbol, ref_date)
 
+    # Safety guard (trading-critical): in a live session the reference high comes
+    # from the live quote, not the DB. If there is *no* prior stored history we
+    # cannot validate an all-time high — this happens only when seeding failed
+    # (yfinance returned nothing) or for a same-day IPO. Declaring "ATH TODAY"
+    # off a live price with a zero baseline is a false positive that could drive
+    # a bad trade, so surface "unknown" (None → N/A in the UI) instead.
+    if live and prior is None:
+        return None
+
     prior_high = prior[0] if prior else 0.0
     is_ath = ref_high > 0 and ref_high >= prior_high
 

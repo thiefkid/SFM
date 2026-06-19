@@ -43,46 +43,38 @@ async def _finnhub_quote(symbol: str) -> dict:
     return r.json()
 
 
-def _yf_batch(symbols: list[str]) -> tuple[dict[str, float], NasdaqSnapshot]:
-    """Single yfinance download for all symbol volumes + NASDAQ in one HTTP call."""
-    all_syms = [*symbols, "^IXIC"]
-    try:
-        df = yf.download(all_syms, period="2d", progress=False, auto_adjust=True, threads=True)
-    except Exception as exc:
-        logger.warning("yfinance batch download failed: %s", exc)
-        return {s: 0.0 for s in symbols}, NasdaqSnapshot(rt_level=0.0, open_level=0.0, prev_close=0.0, error=str(exc))
+def _yf_volumes(symbols: list[str]) -> dict[str, float]:
+    """Single yfinance download for all symbols' current-day volume.
 
-    # Volume per symbol (today's last row)
-    volumes: dict[str, float] = {}
+    Feeds only I4's today turnover (price × volume). NASDAQ is fetched
+    separately in get_nasdaq_snapshot (fast_info) — bundling the index here just
+    pulled ^IXIC twice and discarded the result, so it's intentionally omitted.
+    """
+    if not symbols:
+        return {}
     try:
-        vol = df["Volume"]
-        last = vol.iloc[-1] if not df.empty else pd.Series(dtype=float)
+        df = yf.download(symbols, period="2d", progress=False, auto_adjust=True, threads=True)
+    except Exception as exc:
+        logger.warning("yfinance volume download failed: %s", exc)
+        return {s: 0.0 for s in symbols}
+
+    if df.empty:
+        return {s: 0.0 for s in symbols}
+
+    # Volume per symbol from the most recent row. With multiple symbols df["Volume"]
+    # is a DataFrame (columns = symbols) and .iloc[-1] is a Series; with a single
+    # symbol it's a plain Series and .iloc[-1] is a scalar. Guard NaN so a halted
+    # ticker can't poison today_value with NaN (which breaks JSON serialisation).
+    try:
+        last = df["Volume"].iloc[-1]
+        volumes: dict[str, float] = {}
         for s in symbols:
-            volumes[s] = float(last[s] if isinstance(last, pd.Series) and s in last else 0 or 0)
-    except Exception:
-        volumes = {s: 0.0 for s in symbols}
-
-    # NASDAQ: rt from last close, open from today, prev_close from yesterday
-    nasdaq = NasdaqSnapshot(rt_level=0.0, open_level=0.0, prev_close=0.0)
-    try:
-        closes = df["Close"]["^IXIC"] if isinstance(df.columns, pd.MultiIndex) else df["Close"]
-        opens = df["Open"]["^IXIC"] if isinstance(df.columns, pd.MultiIndex) else df["Open"]
-        if len(closes) >= 2:
-            nasdaq = NasdaqSnapshot(
-                rt_level=float(closes.iloc[-1] or 0),
-                open_level=float(opens.iloc[-1] or 0),
-                prev_close=float(closes.iloc[-2] or 0),
-            )
-        elif len(closes) == 1:
-            nasdaq = NasdaqSnapshot(
-                rt_level=float(closes.iloc[-1] or 0),
-                open_level=float(opens.iloc[-1] or 0),
-                prev_close=0.0,
-            )
+            raw = last.get(s) if isinstance(last, pd.Series) else last
+            volumes[s] = float(raw) if raw is not None and pd.notna(raw) else 0.0
+        return volumes
     except Exception as exc:
-        logger.warning("yfinance NASDAQ parse failed: %s", exc)
-
-    return volumes, nasdaq
+        logger.warning("yfinance volume parse failed: %s", exc)
+        return {s: 0.0 for s in symbols}
 
 
 def _build_snapshot(symbol: str, quote: dict, volume: float) -> StockSnapshot:
@@ -108,9 +100,9 @@ async def get_all_snapshots(symbols: list[str]) -> list[StockSnapshot]:
     if not settings.finnhub_api_key:
         return [_make_fallback_snapshot(s, "FINNHUB_API_KEY not configured") for s in symbols]
 
-    quotes, (volumes, _nasdaq) = await asyncio.gather(
+    quotes, volumes = await asyncio.gather(
         asyncio.gather(*[_finnhub_quote(s) for s in symbols]),
-        asyncio.to_thread(_yf_batch, symbols),
+        asyncio.to_thread(_yf_volumes, symbols),
     )
 
     results = []
