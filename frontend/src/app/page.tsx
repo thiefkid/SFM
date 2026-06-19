@@ -103,14 +103,14 @@ export default function DashboardPage() {
           className="rounded p-4 text-sm space-y-1"
           style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
         >
-          <p className="font-medium mb-2" style={{ color: "var(--muted)" }}>Indicators</p>
+          <p className="font-medium mb-2" style={{ color: "var(--muted)" }}>Indicator Reference</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-1" style={{ color: "var(--muted)" }}>
-            <span><span style={{ color: "var(--text)" }}>I1</span> — price vs open</span>
-            <span><span style={{ color: "var(--text)" }}>I2</span> — price vs prev close</span>
-            <span><span style={{ color: "var(--text)" }}>I3</span> — position in day range (1.0 = high, 0 = open)</span>
-            <span><span style={{ color: "var(--text)" }}>I4</span> — 15-day trading value · yellow if &gt;1.5x avg</span>
-            <span><span style={{ color: "var(--text)" }}>I5</span> — all-time high + 52-week high</span>
-            <span><span style={{ color: "var(--text)" }}>I6</span> — NASDAQ change (table footer)</span>
+            <span><span style={{ color: "var(--text)" }}>I1</span> — (RT price − open) / open</span>
+            <span><span style={{ color: "var(--text)" }}>I2</span> — (RT price − prev close) / prev close</span>
+            <span><span style={{ color: "var(--text)" }}>I3</span> — (RT price − open) / (today high − open) · 1.0 = at day high, 0 = at open</span>
+            <span><span style={{ color: "var(--text)" }}>I4</span> — bar chart: 15-day trading value history + today (highlighted) · yellow if &gt;1.5× avg</span>
+            <span><span style={{ color: "var(--text)" }}>I5</span> — all-time high (★ if new ATH today) + 52-week high price &amp; date</span>
+            <span><span style={{ color: "var(--text)" }}>I6</span> — NASDAQ % change (shown in table footer)</span>
           </div>
         </div>
       </main>
