@@ -182,40 +182,81 @@ class FutuScraper:
             except Exception:
                 pass
 
-            # Scope to main content to avoid nav/sidebar links
-            links = await page.evaluate("""
+            # Read the ranking from the Symbol (代碼) column TEXT, not link URLs.
+            #
+            # Equity rows carry an /en/stock/X-US link, but ETF rows (e.g. SPCH,
+            # DRAM) do not — so a link-only scrape silently drops ETFs and lets
+            # lower-ranked equities slide up. The Symbol column renders the
+            # ticker as plain text for every row regardless of type, in display
+            # (rank) order. We extract that, and also the link-based list as a
+            # cross-check (see the subsequence validation below).
+            data = await page.evaluate("""
                 () => {
-                    const PATTERN = /\\/en\\/stock\\/[A-Z]+-US/;
+                    const TICKER = /^[A-Z]{1,5}$/;
+                    const STOCK = /\\/en\\/stock\\/[A-Z]+-US/;
                     const scopes = ['main', '[class*="content"]', '[class*="table"]',
                                     '[class*="list"]', '[class*="rank"]', 'body'];
-                    for (const scope of scopes) {
-                        const container = document.querySelector(scope);
-                        if (!container) continue;
-                        const anchors = Array.from(container.querySelectorAll('a[href]'));
-                        const hrefs = anchors
-                            .map(a => a.getAttribute('href'))
-                            .filter(h => h && PATTERN.test(h));
-                        if (hrefs.length >= 10) return hrefs;
+                    let container = document.body;
+                    for (const sel of scopes) {
+                        const el = document.querySelector(sel);
+                        if (!el) continue;
+                        let n = 0;
+                        for (const a of el.querySelectorAll('a[href]'))
+                            if (STOCK.test(a.getAttribute('href') || '')) n++;
+                        if (n >= 10) { container = el; break; }
                     }
-                    return Array.from(document.querySelectorAll('a[href]'))
+
+                    // Symbol-column text: standalone leaf elements whose text is
+                    // exactly a ticker, in document (rank) order.
+                    const text = [];
+                    const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT);
+                    for (let node = walker.currentNode; node; node = walker.nextNode()) {
+                        if (node.children.length === 0) {
+                            const t = (node.textContent || '').trim();
+                            if (TICKER.test(t)) text.push(t);
+                        }
+                    }
+
+                    // Link-based list (equities only) — validation baseline.
+                    const links = Array.from(container.querySelectorAll('a[href]'))
                         .map(a => a.getAttribute('href'))
-                        .filter(h => h && PATTERN.test(h));
+                        .filter(h => h && STOCK.test(h));
+
+                    return { text, links };
                 }
             """)
 
-            symbols: list[str] = []
-            seen: set[str] = set()
-            for href in links:
-                match = re.search(r"/en/stock/([A-Z]+)-US", href)
-                if match:
-                    symbol = match.group(1)
-                    if symbol not in seen:
-                        seen.add(symbol)
-                        symbols.append(symbol)
-                if len(symbols) >= 10:
-                    break
+            def _dedupe(seq):
+                out, seen = [], set()
+                for s in seq:
+                    if s and s not in seen:
+                        seen.add(s)
+                        out.append(s)
+                return out
 
-            logger.info("Futu ranking extracted %d symbols: %s", len(symbols), symbols)
+            def _is_subsequence(sub, full):
+                it = iter(full)
+                return all(x in it for x in sub)
+
+            text_syms = _dedupe(data.get("text", []))
+            href_syms = _dedupe(
+                m.group(1)
+                for m in (re.search(r"/en/stock/([A-Z]+)-US", h) for h in data.get("links", []))
+                if m
+            )
+
+            # Prefer the Symbol-column list (includes ETFs) only when it preserves
+            # the verified equity order as an in-order subsequence; otherwise fall
+            # back to the link-based list so we never rank worse than before.
+            if len(text_syms) >= 10 and href_syms and _is_subsequence(href_syms[:10], text_syms):
+                symbols = text_syms[:10]
+            else:
+                symbols = href_syms[:10]
+
+            logger.info(
+                "Futu ranking: symbol-col=%s link-based=%s -> top10=%s",
+                text_syms[:12], href_syms[:12], symbols,
+            )
             return symbols if symbols else list(_MOCK_SYMBOLS)
         finally:
             await page.close()
