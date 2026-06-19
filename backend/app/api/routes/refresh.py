@@ -16,7 +16,7 @@ from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
 from app.services import quotes as quote_service
 from app.services.historical import (
     ATHResult, PastValuesResult, YearHighResult,
-    ensure_seeded, get_ath, get_past_values, get_year_high,
+    ensure_seeded, get_ath_status, get_past_values, get_year_high,
 )
 
 router = APIRouter()
@@ -141,7 +141,12 @@ def _mock_history(symbol: str) -> tuple[PastValuesResult, ATHResult, YearHighRes
     avg = sum(past) / len(past)
     history = PastValuesResult(values=past, avg=avg, count=15)
     ath_date = date.today() - timedelta(days=rng.randint(30, 500))
-    ath = ATHResult(ath_price=base / 800_000, ath_date=ath_date, days_since_ath=(date.today() - ath_date).days)
+    ath = ATHResult(
+        is_ath=rng.random() < 0.2,
+        ath_price=base / 800_000,
+        ath_date=ath_date,
+        days_since_ath=(date.today() - ath_date).days,
+    )
     yh_date = date.today() - timedelta(days=rng.randint(1, 180))
     year_high = YearHighResult(high_price=base / 900_000, high_date=yh_date)
     return history, ath, year_high
@@ -159,7 +164,7 @@ async def _process_symbol(
         await ensure_seeded(symbol)
         history, ath, year_high = await asyncio.gather(
             get_past_values(symbol, days=15),
-            get_ath(symbol),
+            get_ath_status(symbol, snapshot.today_high),
             get_year_high(symbol),
         )
     return ind_engine.compute_all(snapshot, history, ath, year_high, nasdaq)

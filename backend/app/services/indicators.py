@@ -110,10 +110,13 @@ def compute_i4(today_value: float, history: PastValuesResult) -> I4Result:
 
 def compute_i5(
     ath: ATHResult | None,
-    today_high: float,
     year_high: YearHighResult | None,
 ) -> I5Result:
-    """All-time high status + 52-week high."""
+    """All-time high status + 52-week high.
+
+    ATH status is resolved upstream in historical.get_ath_status (reference-day
+    logic against the DB); here we just map it onto the response model.
+    """
     year_high_price = year_high.high_price if year_high else None
     year_high_date = year_high.high_date if year_high else None
 
@@ -123,15 +126,8 @@ def compute_i5(
             year_high=year_high_price, year_high_date=year_high_date,
         )
 
-    is_ath = today_high > ath.ath_price
-    if is_ath:
-        return I5Result(
-            is_ath=True, ath_price=today_high, ath_date=date.today(), days_since_ath=0,
-            year_high=year_high_price, year_high_date=year_high_date,
-        )
-
     return I5Result(
-        is_ath=False,
+        is_ath=ath.is_ath,
         ath_price=ath.ath_price,
         ath_date=ath.ath_date,
         days_since_ath=ath.days_since_ath,
@@ -176,6 +172,6 @@ def compute_all(
         i2=compute_i2(snapshot.rt_price, snapshot.prev_close),
         i3=compute_i3(snapshot.rt_price, snapshot.open_price, snapshot.today_high),
         i4=compute_i4(snapshot.today_value, history),
-        i5=compute_i5(ath, snapshot.today_high, year_high),
+        i5=compute_i5(ath, year_high),
         i6=compute_i6(nasdaq),
     )
