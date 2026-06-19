@@ -245,17 +245,16 @@ class FutuScraper:
                 if m
             )
 
-            # Prefer the Symbol-column list (includes ETFs) only when it preserves
-            # the verified equity order as an in-order subsequence; otherwise fall
-            # back to the link-based list so we never rank worse than before.
-            if len(text_syms) >= 10 and href_syms and _is_subsequence(href_syms[:10], text_syms):
-                symbols = text_syms[:10]
-            else:
-                symbols = href_syms[:10]
+            # Link-based list is the stable source for now. The Symbol-column
+            # text also picks up UI chrome (IPO/ETF/HK/US filter chips and
+            # badges) that matches the ticker pattern, so it's logged for
+            # analysis but NOT used for selection until row-scoped extraction
+            # lands.
+            symbols = href_syms[:10]
 
             logger.info(
                 "Futu ranking: symbol-col=%s link-based=%s -> top10=%s",
-                text_syms[:12], href_syms[:12], symbols,
+                text_syms[:20], href_syms[:12], symbols,
             )
             return symbols if symbols else list(_MOCK_SYMBOLS)
         finally:
