@@ -73,6 +73,17 @@ _MOCK_NASDAQ = NasdaqSnapshot(
     prev_close=17_718.30,
 )
 
+# Leading UI chrome on Futu's most-active page renders as ticker-like tokens
+# *before* the ranking: a category row (IPO / ETF / …) plus region-filter chips
+# (HK / US / CN / …). None of these is ever a ranked symbol, so the first token
+# that is NOT in this set is rank #1 — equity OR ETF. Anchoring on "first row
+# that isn't chrome" (instead of "first equity") is what keeps a rank-1 ETF,
+# since ETF rows carry no /en/stock/ link and would otherwise be skipped.
+_CHROME_TOKENS = {
+    "IPO", "ETF", "ETN", "ADR", "REIT",                              # category chips
+    "HK", "US", "CN", "SG", "AU", "JP", "CA", "MY", "UK", "EU", "IN",  # region chips
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -246,27 +257,41 @@ class FutuScraper:
             )
 
             # The Symbol-column text is preceded by UI chrome (IPO/ETF/HK/US/CN…
-            # filter + region chips) that also matches the ticker pattern. The
-            # real ranking begins at the first token that is a known equity
-            # (i.e. appears in the link-based list); those region chips never
-            # carry an /en/stock/ link, so anchoring there slices off the chrome
-            # while keeping interleaved ETF rows (SPCH, DRAM) in display order.
+            # category + region chips). The real ranking begins at the first
+            # token that is NOT a known chrome chip — which works even when
+            # rank #1 is an ETF (no /en/stock/ link). We then keep two candidate
+            # start points and pick the first that validates against the
+            # link-based equity order, so we never rank worse than link-only.
             href_set = set(href_syms)
-            anchor = next((i for i, s in enumerate(text_syms) if s in href_set), None)
 
-            symbols = href_syms[:10]  # default / fallback
-            if anchor is not None:
-                candidate = text_syms[anchor:anchor + 10]
+            # Primary anchor: end of the leading known-chrome block.
+            chrome_end = 0
+            while chrome_end < len(text_syms) and text_syms[chrome_end] in _CHROME_TOKENS:
+                chrome_end += 1
+            chrome_anchor = chrome_end if chrome_end < len(text_syms) else None
+
+            # Secondary anchor: first equity — backstop for any unknown chrome
+            # chip our set doesn't list yet (region chips never carry a link).
+            equity_anchor = next((i for i, s in enumerate(text_syms) if s in href_set), None)
+
+            symbols = href_syms[:10]  # default / fallback (link-based, ETF-blind)
+            chosen = None
+            for cand_start in (chrome_anchor, equity_anchor):
+                if cand_start is None:
+                    continue
+                candidate = text_syms[cand_start:cand_start + 10]
                 equities_in_candidate = [s for s in candidate if s in href_set]
-                # Trust the chrome-stripped list only if it's a full 10 and its
-                # equities preserve the verified link-based order — otherwise the
-                # link-based fallback stands, so we never rank worse than before.
+                # Trust a chrome-stripped slice only if it's a full 10 whose
+                # equities preserve the verified link-based order.
                 if len(candidate) == 10 and _is_subsequence(equities_in_candidate, href_syms):
                     symbols = candidate
+                    chosen = cand_start
+                    break
 
             logger.info(
-                "Futu ranking: symbol-col=%s link-based=%s anchor=%s -> top10=%s",
-                text_syms[:20], href_syms[:12], anchor, symbols,
+                "Futu ranking: symbol-col=%s link-based=%s chrome_anchor=%s "
+                "equity_anchor=%s chosen=%s -> top10=%s",
+                text_syms[:20], href_syms[:12], chrome_anchor, equity_anchor, chosen, symbols,
             )
             return symbols if symbols else list(_MOCK_SYMBOLS)
         finally:
