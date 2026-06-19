@@ -152,6 +152,22 @@ def _mock_history(symbol: str) -> tuple[PastValuesResult, ATHResult, YearHighRes
     return history, ath, year_high
 
 
+async def _get_nasdaq() -> NasdaqSnapshot:
+    """Real-time NASDAQ level, preferring Futu's live index page.
+
+    Futu's .IXIC-US page is live and matches the real-time basis of the
+    per-stock Finnhub quotes. yfinance fast_info is ~15 min delayed, so it's
+    kept only as a backstop when the Futu scrape fails or yields an empty level.
+    """
+    try:
+        snap = await scraper.get_nasdaq_snapshot()
+        if snap.error is None and snap.rt_level > 0:
+            return snap
+    except Exception:
+        pass
+    return await quote_service.get_nasdaq_snapshot()
+
+
 async def _process_symbol(
     symbol: str,
     snapshot: StockSnapshot,
@@ -194,9 +210,9 @@ async def refresh() -> RefreshResponse:
     if not symbols:
         raise HTTPException(status_code=502, detail="Failed to fetch candidates from Futu")
 
-    # Step 2: fetch quotes (Finnhub) + NASDAQ (yfinance) concurrently
+    # Step 2: fetch quotes (Finnhub) + NASDAQ (Futu live, yfinance fallback) concurrently
     snapshots_task = quote_service.get_all_snapshots(symbols)
-    nasdaq_task = quote_service.get_nasdaq_snapshot()
+    nasdaq_task = _get_nasdaq()
     snapshots, nasdaq = await asyncio.gather(snapshots_task, nasdaq_task)
 
     if all(s.error for s in snapshots):
