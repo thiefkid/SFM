@@ -12,12 +12,15 @@ development with synthetic data.
 """
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 
 from playwright.async_api import async_playwright, Page, Browser
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -179,22 +182,49 @@ class FutuScraper:
             except Exception:
                 pass
 
-            # Scope to main content to avoid nav/sidebar links
+            # Identify the actual ranking table body and read its rows in order.
+            #
+            # The page has stock links in several places (promo strips, related
+            # lists, gainers/losers). Grabbing every link in DOM order mixes them
+            # in and corrupts the ranking. Instead we find the "branch point":
+            # the deepest element that contains >= 10 matching links but whose
+            # individual children each contain fewer — i.e. the row container
+            # where the ranking fans out one-link-per-row. Scattered promo links
+            # living in other subtrees never reach that threshold, so they're
+            # excluded, and document order within the container == visual rank.
             links = await page.evaluate("""
                 () => {
                     const PATTERN = /\\/en\\/stock\\/[A-Z]+-US/;
-                    const scopes = ['main', '[class*="content"]', '[class*="table"]',
-                                    '[class*="list"]', '[class*="rank"]', 'body'];
-                    for (const scope of scopes) {
-                        const container = document.querySelector(scope);
-                        if (!container) continue;
-                        const anchors = Array.from(container.querySelectorAll('a[href]'));
-                        const hrefs = anchors
-                            .map(a => a.getAttribute('href'))
-                            .filter(h => h && PATTERN.test(h));
-                        if (hrefs.length >= 10) return hrefs;
+                    const K = 10;
+                    const matches = Array.from(document.querySelectorAll('a[href]'))
+                        .filter(a => PATTERN.test(a.getAttribute('href') || ''));
+                    if (matches.length === 0) return [];
+
+                    // Count matching links under every ancestor element.
+                    const counts = new Map();
+                    for (const a of matches) {
+                        for (let el = a.parentElement; el; el = el.parentElement) {
+                            counts.set(el, (counts.get(el) || 0) + 1);
+                        }
                     }
-                    return Array.from(document.querySelectorAll('a[href]'))
+
+                    const depth = (el) => { let d = 0; for (let p = el; p; p = p.parentElement) d++; return d; };
+
+                    // Deepest container holding >= K links whose children each
+                    // hold < K (the row container / table body).
+                    const candidates = [...counts.entries()]
+                        .filter(([, c]) => c >= K)
+                        .sort((a, b) => depth(b[0]) - depth(a[0]));
+
+                    let container = null;
+                    for (const [el] of candidates) {
+                        const childMax = Math.max(0,
+                            ...Array.from(el.children).map(ch => counts.get(ch) || 0));
+                        if (childMax < K) { container = el; break; }
+                    }
+                    if (!container) container = candidates.length ? candidates[0][0] : document.body;
+
+                    return Array.from(container.querySelectorAll('a[href]'))
                         .map(a => a.getAttribute('href'))
                         .filter(h => h && PATTERN.test(h));
                 }
@@ -212,6 +242,7 @@ class FutuScraper:
                 if len(symbols) >= 10:
                     break
 
+            logger.info("Futu ranking extracted %d symbols: %s", len(symbols), symbols)
             return symbols if symbols else list(_MOCK_SYMBOLS)
         finally:
             await page.close()
