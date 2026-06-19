@@ -16,7 +16,7 @@ from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
 from app.services import quotes as quote_service
 from app.services.historical import (
     ATHResult, PastValuesResult, YearHighResult,
-    ensure_seeded, get_ath_status, get_past_values, get_year_high,
+    ensure_fresh, get_ath_status, get_past_values, get_year_high, _now_et,
 )
 
 router = APIRouter()
@@ -156,16 +156,19 @@ async def _process_symbol(
     symbol: str,
     snapshot: StockSnapshot,
     nasdaq: NasdaqSnapshot,
+    now_et: datetime,
 ) -> ind_engine.StockIndicators:
-    """Ensure history is seeded, then compute all indicators."""
+    """Ensure complete history, then compute all indicators."""
     if settings.scraper_mock_mode:
         history, ath, year_high = _mock_history(symbol)
     else:
-        await ensure_seeded(symbol)
+        # Backfill/normalise history first so ATH + 52-week high are computed
+        # over the complete, correctly-adjusted series.
+        await ensure_fresh(symbol, now_et)
         history, ath, year_high = await asyncio.gather(
             get_past_values(symbol, days=15),
-            get_ath_status(symbol, snapshot.today_high),
-            get_year_high(symbol),
+            get_ath_status(symbol, snapshot.today_high, now_et),
+            get_year_high(symbol, snapshot.today_high, now_et),
         )
     return ind_engine.compute_all(snapshot, history, ath, year_high, nasdaq)
 
@@ -199,9 +202,11 @@ async def refresh() -> RefreshResponse:
     if all(s.error for s in snapshots):
         raise HTTPException(status_code=502, detail=f"All quote fetches failed: {snapshots[0].error}")
 
-    # Step 3+4: seed history + compute indicators for each symbol
+    # Step 3+4: backfill history + compute indicators for each symbol.
+    # One shared "now" so freshness, ATH and 52-week high all agree on the clock.
+    now_et = _now_et()
     tasks = [
-        _process_symbol(snap.symbol, snap, nasdaq)
+        _process_symbol(snap.symbol, snap, nasdaq, now_et)
         for snap in snapshots
     ]
     all_indicators = await asyncio.gather(*tasks)

@@ -14,10 +14,9 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from app.core.database import async_session
-from app.models.daily_price import DailyPrice
 
 
 # US market timezone + regular-session bounds (regular hours: 09:30–16:00 ET)
@@ -52,6 +51,23 @@ def _today_bar_is_final(now_et: datetime) -> bool:
     return (now_et.hour, now_et.minute) >= _MARKET_CLOSE
 
 
+def _last_expected_session(now_et: datetime) -> date:
+    """
+    The most recent date for which a *completed* daily bar should exist
+    (holiday-naive — holidays just cause a harmless re-fetch that finds nothing).
+
+    Today counts only once its regular session has closed; otherwise we step
+    back to the previous weekday.
+    """
+    d = now_et.date()
+    if now_et.weekday() < 5 and (now_et.hour, now_et.minute) >= _MARKET_CLOSE:
+        return d
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
@@ -83,9 +99,10 @@ class YearHighResult:
 
 async def seed_symbol(symbol: str) -> int:
     """
-    Fetch full price history from yfinance and upsert into daily_prices.
+    Fetch the full price history from yfinance and upsert into daily_prices.
+    Overwrites overlapping rows (ON CONFLICT DO UPDATE), so it both backfills
+    any gaps and normalises older rows to the current adjustment basis.
     Returns number of rows inserted/updated.
-    Safe to call multiple times (upserts).
     """
     df = await asyncio.to_thread(_fetch_yfinance, symbol, period="max")
     if df is None or df.empty:
@@ -93,16 +110,13 @@ async def seed_symbol(symbol: str) -> int:
     return await _upsert_dataframe(symbol, df)
 
 
-async def update_symbol_yesterday(symbol: str) -> int:
-    """Append the most recent ~5 days (idempotent, handles weekends)."""
-    df = await asyncio.to_thread(_fetch_yfinance, symbol, period="5d")
-    if df is None or df.empty:
-        return 0
-    return await _upsert_dataframe(symbol, df)
-
-
 async def update_all_known_symbols() -> None:
-    """Nightly job: update yesterday's bar for all symbols we have history for."""
+    """Nightly job (best-effort): refresh every symbol we have history for.
+
+    Cloud Run scales to zero, so this scheduler is not guaranteed to fire —
+    ensure_fresh on each /refresh is the real source of truth. This is just a
+    bonus top-up when the container happens to be alive.
+    """
     async with async_session() as session:
         result = await session.execute(
             text("SELECT DISTINCT symbol FROM daily_prices")
@@ -111,7 +125,7 @@ async def update_all_known_symbols() -> None:
 
     for symbol in symbols:
         try:
-            await update_symbol_yesterday(symbol)
+            await ensure_fresh(symbol)
         except Exception:
             pass  # log in production; don't let one failure block others
         await asyncio.sleep(0.5)  # respect yfinance rate limits
@@ -121,14 +135,34 @@ async def update_all_known_symbols() -> None:
 # Queries
 # ---------------------------------------------------------------------------
 
-async def ensure_seeded(symbol: str) -> None:
-    """Seed symbol if it has no history yet."""
+async def _latest_stored_date(symbol: str) -> date | None:
+    """Most recent date we have a bar for, or None if the symbol is unseeded."""
     async with async_session() as session:
         result = await session.execute(
-            select(DailyPrice).where(DailyPrice.symbol == symbol).limit(1)
+            text("SELECT MAX(date) FROM daily_prices WHERE symbol = :symbol"),
+            {"symbol": symbol},
         )
-        if result.scalar_one_or_none() is None:
-            await seed_symbol(symbol)
+        row = result.fetchone()
+        return row[0] if row and row[0] else None
+
+
+async def ensure_fresh(symbol: str, now_et: datetime | None = None) -> None:
+    """
+    Guarantee complete, up-to-date history for a symbol before indicators run.
+
+    Because Cloud Run scales to zero the nightly scheduler can't be relied on,
+    so freshness is enforced here on every refresh. If we're already holding the
+    most recent completed session we do nothing (no network call); otherwise we
+    re-pull the full history. A full re-pull (rather than a 5-day patch) is
+    intentional: it backfills arbitrarily long gaps for symbols that dropped out
+    of the top-10 for a while, and overwrites any stale rows — so ATH and the
+    52-week high are always computed over the complete, correctly-adjusted series.
+    """
+    now_et = now_et or _now_et()
+    latest = await _latest_stored_date(symbol)
+    if latest is not None and latest >= _last_expected_session(now_et):
+        return
+    await seed_symbol(symbol)
 
 
 async def _max_high_before(session, symbol: str, before: date) -> tuple[float, date] | None:
@@ -230,9 +264,23 @@ async def get_past_values(symbol: str, days: int = 15) -> PastValuesResult:
     return PastValuesResult(values=values, avg=avg, count=len(values))
 
 
-async def get_year_high(symbol: str) -> YearHighResult | None:
-    """Return the 52-week (1-year) high price and date."""
-    one_year_ago = date.today() - timedelta(days=365)
+async def get_year_high(
+    symbol: str,
+    today_high: float,
+    now_et: datetime | None = None,
+) -> YearHighResult | None:
+    """
+    Highest high over the trailing 52 weeks, including today's live intraday high.
+
+    Mirrors get_ath_status: during/after a session today's live high is folded in
+    (today's bar isn't persisted intraday), otherwise the most recent completed
+    day already sits in the stored window.
+    """
+    now_et = now_et or _now_et()
+    today = now_et.date()
+    one_year_ago = today - timedelta(days=365)
+    live = _session_started(now_et) and today_high and today_high > 0
+
     async with async_session() as session:
         result = await session.execute(
             text("""
@@ -241,15 +289,24 @@ async def get_year_high(symbol: str) -> YearHighResult | None:
                 WHERE symbol = :symbol
                   AND high IS NOT NULL
                   AND date >= :one_year_ago
+                  AND date < :today
                 ORDER BY high DESC
                 LIMIT 1
             """),
-            {"symbol": symbol, "one_year_ago": one_year_ago},
+            {"symbol": symbol, "one_year_ago": one_year_ago, "today": today},
         )
         row = result.fetchone()
-        if row is None:
-            return None
-        return YearHighResult(high_price=float(row[0]), high_date=row[1])
+
+    candidates: list[tuple[float, date]] = []
+    if row is not None:
+        candidates.append((float(row[0]), row[1]))
+    if live:
+        candidates.append((float(today_high), today))
+
+    if not candidates:
+        return None
+    high, high_date = max(candidates, key=lambda c: c[0])
+    return YearHighResult(high_price=high, high_date=high_date)
 
 
 # ---------------------------------------------------------------------------
@@ -257,10 +314,19 @@ async def get_year_high(symbol: str) -> YearHighResult | None:
 # ---------------------------------------------------------------------------
 
 def _fetch_yfinance(symbol: str, period: str) -> pd.DataFrame | None:
-    """Synchronous yfinance fetch (run in thread pool)."""
+    """Synchronous yfinance fetch (run in thread pool).
+
+    auto_adjust=False is deliberate and matters for ATH/52-week accuracy:
+    Yahoo's OHLC are split-adjusted but NOT dividend-adjusted, which is exactly
+    the basis the live Finnhub quote uses. With auto_adjust=True the historical
+    High column gets back-adjusted *down* for dividends, so it sits below the
+    prices actually traded — comparing that against an unadjusted live price
+    produces false all-time highs. Splits are still adjusted (by Yahoo), so a
+    pre-split peak won't spuriously beat the current price.
+    """
     try:
         ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, auto_adjust=True)
+        df = ticker.history(period=period, auto_adjust=False)
         return df if not df.empty else None
     except Exception:
         return None
