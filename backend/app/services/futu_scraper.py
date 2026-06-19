@@ -245,16 +245,28 @@ class FutuScraper:
                 if m
             )
 
-            # Link-based list is the stable source for now. The Symbol-column
-            # text also picks up UI chrome (IPO/ETF/HK/US filter chips and
-            # badges) that matches the ticker pattern, so it's logged for
-            # analysis but NOT used for selection until row-scoped extraction
-            # lands.
-            symbols = href_syms[:10]
+            # The Symbol-column text is preceded by UI chrome (IPO/ETF/HK/US/CN…
+            # filter + region chips) that also matches the ticker pattern. The
+            # real ranking begins at the first token that is a known equity
+            # (i.e. appears in the link-based list); those region chips never
+            # carry an /en/stock/ link, so anchoring there slices off the chrome
+            # while keeping interleaved ETF rows (SPCH, DRAM) in display order.
+            href_set = set(href_syms)
+            anchor = next((i for i, s in enumerate(text_syms) if s in href_set), None)
+
+            symbols = href_syms[:10]  # default / fallback
+            if anchor is not None:
+                candidate = text_syms[anchor:anchor + 10]
+                equities_in_candidate = [s for s in candidate if s in href_set]
+                # Trust the chrome-stripped list only if it's a full 10 and its
+                # equities preserve the verified link-based order — otherwise the
+                # link-based fallback stands, so we never rank worse than before.
+                if len(candidate) == 10 and _is_subsequence(equities_in_candidate, href_syms):
+                    symbols = candidate
 
             logger.info(
-                "Futu ranking: symbol-col=%s link-based=%s -> top10=%s",
-                text_syms[:20], href_syms[:12], symbols,
+                "Futu ranking: symbol-col=%s link-based=%s anchor=%s -> top10=%s",
+                text_syms[:20], href_syms[:12], anchor, symbols,
             )
             return symbols if symbols else list(_MOCK_SYMBOLS)
         finally:
