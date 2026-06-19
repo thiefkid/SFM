@@ -11,6 +11,14 @@ from app.core.config import settings
 from app.core.database import create_tables, async_session
 from app.api.routes import refresh as refresh_router
 
+# Emit INFO logs to stdout so Cloud Run captures them. Without this the root
+# logger defaults to WARNING and every logger.info(...) is silently dropped.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+)
+logging.getLogger().setLevel(logging.INFO)  # in case a handler is already attached
+
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone="US/Eastern")
