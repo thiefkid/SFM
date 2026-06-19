@@ -1,9 +1,21 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "SFM — Stock Pick Dashboard",
   description: "Daily stock indicator dashboard for 3:59 PM picks",
+  appleWebApp: {
+    capable: true,
+    title: "SFM",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#111210",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

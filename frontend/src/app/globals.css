@@ -1,19 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --border: #2a2d3a;
-  --text: #e2e8f0;
-  --muted: #64748b;
-  --green: #22c55e;
-  --red: #ef4444;
-  --gold: #f59e0b;
-  --blue: #3b82f6;
+  /* Warm dark palette — optimised for dark-room viewing at 3:55 AM.
+     No cool blues; max text brightness ~85% to avoid dazzle. */
+  --bg: #111210;
+  --surface: #1a1c19;
+  --border: #2a2c27;
+  --text: #d4cfc4;
+  --text-bright: #e8e3d8;
+  --muted: #7a7568;
+  --green: #4ade80;
+  --red: #f87171;
+  --gold: #fbbf24;
+  --blue: #60a5fa;
 }
 
 body {
   background-color: var(--bg);
   color: var(--text);
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  /* Prevent iPad double-tap zoom on the table */
+  touch-action: manipulation;
+}
+
+/* Numbers/prices stay monospace for column alignment */
+.font-mono,
+.tabular-nums {
+  font-family: "SF Mono", "Menlo", ui-monospace, monospace;
 }

@@ -4,11 +4,11 @@ import type { NasdaqResult } from "@/types/dashboard";
 
 function Pct({ value, label }: { value: number; label: string }) {
   const sign = value >= 0 ? "+" : "";
-  const color = value >= 0 ? "text-green-400" : "text-red-400";
+  const color = value >= 0 ? "var(--green)" : "var(--red)";
   return (
-    <span className="flex items-center gap-1">
-      <span className="text-slate-500 text-xs">{label}</span>
-      <span className={`font-semibold ${color}`}>
+    <span className="flex items-center gap-2">
+      <span className="text-sm" style={{ color: "var(--muted)" }}>{label}</span>
+      <span className="font-semibold text-base tabular-nums" style={{ color }}>
         {sign}{(value * 100).toFixed(2)}%
       </span>
     </span>
@@ -33,46 +33,44 @@ export default function MarketBar({ nasdaq, refreshedAt, debug = false }: Props)
 
   return (
     <div
-      className="flex flex-wrap items-center gap-4 px-6 py-3 text-sm border-b"
+      className="flex flex-wrap items-center gap-5 px-6 py-3 border-b"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
-      {/* NASDAQ level */}
       <div className="flex items-center gap-2">
-        <span className="text-slate-400 font-medium">NASDAQ</span>
-        <span className="font-bold text-white text-base">
-          {nasdaq.rt_level > 0 ? nasdaq.rt_level.toLocaleString() : "—"}
+        <span className="text-sm font-medium" style={{ color: "var(--muted)" }}>NASDAQ</span>
+        <span className="font-bold text-lg tabular-nums" style={{ color: "var(--text-bright)" }}>
+          {nasdaq.rt_level > 0 ? nasdaq.rt_level.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "—"}
         </span>
       </div>
 
-      <span className="text-slate-600">|</span>
+      <span style={{ color: "var(--border)" }}>|</span>
 
       <div className="flex flex-col gap-0.5">
         <Pct value={nasdaq.from_open_pct} label="from open" />
         {debug && nasdaq.open_level > 0 && (
-          <span className="text-amber-400/70 font-mono" style={{ fontSize: 10 }}>
-            ({nasdaq.rt_level.toFixed(3)} − {nasdaq.open_level.toFixed(3)}) / {nasdaq.open_level.toFixed(3)}
+          <span className="font-mono text-amber-400/70" style={{ fontSize: 11 }}>
+            ({nasdaq.rt_level.toFixed(2)} - {nasdaq.open_level.toFixed(2)}) / {nasdaq.open_level.toFixed(2)}
           </span>
         )}
       </div>
       <div className="flex flex-col gap-0.5">
-        <Pct value={nasdaq.from_prev_close_pct} label="from prev close" />
+        <Pct value={nasdaq.from_prev_close_pct} label="prev close" />
         {debug && nasdaq.prev_close > 0 && (
-          <span className="text-amber-400/70 font-mono" style={{ fontSize: 10 }}>
-            ({nasdaq.rt_level.toFixed(3)} − {nasdaq.prev_close.toFixed(3)}) / {nasdaq.prev_close.toFixed(3)}
+          <span className="font-mono text-amber-400/70" style={{ fontSize: 11 }}>
+            ({nasdaq.rt_level.toFixed(2)} - {nasdaq.prev_close.toFixed(2)}) / {nasdaq.prev_close.toFixed(2)}
           </span>
         )}
       </div>
 
       {nasdaq.error && (
-        <span className="text-amber-400 text-xs">⚠ NASDAQ: {nasdaq.error}</span>
+        <span className="text-sm" style={{ color: "var(--gold)" }}>NASDAQ: {nasdaq.error}</span>
       )}
 
-      {/* Spacer */}
       <div className="flex-1" />
 
       {time && (
-        <span className="text-slate-500 text-xs">
-          Last refreshed: <span className="text-slate-300">{time} ET</span>
+        <span className="text-sm" style={{ color: "var(--muted)" }}>
+          Refreshed <span style={{ color: "var(--text)" }}>{time} ET</span>
         </span>
       )}
     </div>

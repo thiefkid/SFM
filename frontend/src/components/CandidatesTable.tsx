@@ -25,21 +25,27 @@ function fmtPrice(value: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Color helpers
+// Color helpers — softer for dark-room viewing
 // ---------------------------------------------------------------------------
 
 function pctColor(value: number | null): string {
-  if (value === null) return "text-slate-500";
-  if (value > 0) return "text-green-400";
-  if (value < 0) return "text-red-400";
-  return "text-slate-400";
+  if (value === null) return "var(--muted)";
+  if (value > 0) return "var(--green)";
+  if (value < 0) return "var(--red)";
+  return "var(--text)";
 }
 
 function i3Color(value: number | null): string {
-  if (value === null) return "text-slate-500";
-  if (value >= 0.8) return "text-green-400";
-  if (value >= 0.4) return "text-yellow-400";
-  return "text-red-400";
+  if (value === null) return "var(--muted)";
+  if (value >= 0.8) return "var(--green)";
+  if (value >= 0.4) return "var(--gold)";
+  return "var(--red)";
+}
+
+function i3BarColor(value: number): string {
+  if (value >= 0.8) return "var(--green)";
+  if (value >= 0.4) return "var(--gold)";
+  return "var(--red)";
 }
 
 // ---------------------------------------------------------------------------
@@ -47,17 +53,19 @@ function i3Color(value: number | null): string {
 // ---------------------------------------------------------------------------
 
 function I3Cell({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-slate-500">—</span>;
+  if (value === null) return <span style={{ color: "var(--muted)" }}>—</span>;
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className={i3Color(value)}>{fmtPct(value)}</span>
-      {/* Mini bar */}
-      <div className="w-full h-1 rounded-full bg-slate-700 overflow-hidden">
+    <div className="flex flex-col gap-1">
+      <span className="tabular-nums font-semibold" style={{ color: i3Color(value) }}>
+        {fmtPct(value)}
+      </span>
+      <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
         <div
-          className={`h-full rounded-full transition-all ${
-            value >= 0.8 ? "bg-green-400" : value >= 0.4 ? "bg-yellow-400" : "bg-red-400"
-          }`}
-          style={{ width: `${Math.max(0, Math.min(100, value * 100))}%` }}
+          className="h-full rounded-full transition-all"
+          style={{
+            width: `${Math.max(0, Math.min(100, value * 100))}%`,
+            background: i3BarColor(value),
+          }}
         />
       </div>
     </div>
@@ -65,46 +73,52 @@ function I3Cell({ value }: { value: number | null }) {
 }
 
 function I4Cell({ today_value, past_values, avg, ratio, day_count }: StockResult["i4"]) {
-  // All bars: past days + today. Find max for scaling.
   const allValues = [...past_values, today_value];
   const maxVal = Math.max(...allValues, 1);
 
+  const todayColor =
+    ratio !== null && ratio >= 1.5
+      ? "var(--gold)"
+      : ratio !== null && ratio >= 1.0
+      ? "var(--blue)"
+      : "var(--muted)";
+
   return (
-    <div className="flex flex-col gap-1" style={{ minWidth: 180 }}>
-      {/* Bar chart */}
-      <div className="flex items-end gap-px h-10">
+    <div className="flex flex-col gap-1.5" style={{ minWidth: 200 }}>
+      <div className="flex items-end gap-px" style={{ height: 36 }}>
         {past_values.map((v, i) => {
           const heightPct = (v / maxVal) * 100;
           return (
             <div
               key={i}
-              className="flex-1 rounded-sm bg-slate-600 hover:bg-slate-400 transition-colors"
-              style={{ height: `${Math.max(4, heightPct)}%` }}
+              className="flex-1 rounded-sm transition-colors"
+              style={{
+                height: `${Math.max(4, heightPct)}%`,
+                background: "var(--muted)",
+                opacity: 0.5,
+              }}
               title={fmtValue(v)}
             />
           );
         })}
-        {/* Today — highlighted */}
         <div
-          className={`flex-1 rounded-sm transition-colors ${
-            ratio !== null && ratio >= 1.5
-              ? "bg-yellow-400"
-              : ratio !== null && ratio >= 1.0
-              ? "bg-blue-400"
-              : "bg-slate-400"
-          }`}
-          style={{ height: `${Math.max(4, (today_value / maxVal) * 100)}%` }}
+          className="flex-1 rounded-sm"
+          style={{
+            height: `${Math.max(4, (today_value / maxVal) * 100)}%`,
+            background: todayColor,
+          }}
           title={`Today: ${fmtValue(today_value)}`}
         />
       </div>
-      {/* Labels */}
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-slate-500">{day_count}d avg: {fmtValue(avg)}</span>
-        <span className={ratio !== null && ratio >= 1.5 ? "text-yellow-300 font-bold" : "text-slate-300"}>
-          {ratio !== null ? `${ratio.toFixed(2)}×` : "—"}
+      <div className="flex items-center justify-between text-sm">
+        <span style={{ color: "var(--muted)" }}>{day_count}d avg: {fmtValue(avg)}</span>
+        <span
+          className="tabular-nums font-semibold"
+          style={{ color: ratio !== null && ratio >= 1.5 ? "var(--gold)" : "var(--text)" }}
+        >
+          {ratio !== null ? `${ratio.toFixed(2)}x` : "—"}
         </span>
       </div>
-      <span className="text-slate-600 text-xs">today: {fmtValue(today_value)}</span>
     </div>
   );
 }
@@ -118,43 +132,40 @@ function fmtDateShort(isoDate: string | null): string {
 
 function I5Cell({ is_ath, ath_price, ath_date, days_since_ath, year_high, year_high_date }: StockResult["i5"]) {
   return (
-    <div className="flex flex-col gap-1 text-xs">
-      {/* ATH row */}
+    <div className="flex flex-col gap-1.5 text-sm">
       {is_ath ? (
         <span
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded font-bold w-fit"
-          style={{ background: "#78350f", color: "#fcd34d" }}
+          className="inline-flex items-center gap-1 px-3 py-1 rounded font-bold w-fit"
+          style={{ background: "#3a2a10", color: "var(--gold)", fontSize: 14 }}
         >
-          ★ ATH TODAY
+          ATH TODAY
         </span>
       ) : (
-        <div className="flex flex-col">
-          <span className="text-slate-400 uppercase tracking-wider" style={{ fontSize: 10 }}>ATH</span>
-          <span className="text-slate-300">
+        <div className="flex flex-col gap-0.5">
+          <span className="uppercase tracking-wider" style={{ color: "var(--muted)", fontSize: 12 }}>ATH</span>
+          <span className="tabular-nums" style={{ color: "var(--text)" }}>
             {ath_price ? `$${ath_price.toFixed(2)}` : "N/A"}
           </span>
           {ath_date && (
-            <span className="text-slate-500">
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>
               {fmtDateShort(ath_date)}
               {days_since_ath !== null && (
-                <span className="text-slate-600"> ({days_since_ath}d ago)</span>
+                <span style={{ opacity: 0.6 }}> ({days_since_ath}d)</span>
               )}
             </span>
           )}
         </div>
       )}
 
-      {/* Divider */}
-      <div style={{ borderTop: "1px solid #2a2d3a" }} />
+      <div style={{ borderTop: "1px solid var(--border)" }} />
 
-      {/* 52-week high row */}
-      <div className="flex flex-col">
-        <span className="text-slate-400 uppercase tracking-wider" style={{ fontSize: 10 }}>52W High</span>
-        <span className="text-slate-300">
+      <div className="flex flex-col gap-0.5">
+        <span className="uppercase tracking-wider" style={{ color: "var(--muted)", fontSize: 12 }}>52W High</span>
+        <span className="tabular-nums" style={{ color: "var(--text)" }}>
           {year_high ? `$${year_high.toFixed(2)}` : "N/A"}
         </span>
         {year_high_date && (
-          <span className="text-slate-500">{fmtDateShort(year_high_date)}</span>
+          <span style={{ color: "var(--muted)", fontSize: 13 }}>{fmtDateShort(year_high_date)}</span>
         )}
       </div>
     </div>
@@ -165,19 +176,28 @@ function I5Cell({ is_ath, ath_price, ath_date, days_since_ath, year_high, year_h
 // Table
 // ---------------------------------------------------------------------------
 
-const TH = ({ children, cls = "" }: { children: React.ReactNode; cls?: string }) => (
+const TH = ({ children, style: extraStyle }: { children: React.ReactNode; style?: React.CSSProperties }) => (
   <th
-    className={`px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-slate-500 whitespace-nowrap ${cls}`}
-    style={{ borderBottom: "1px solid var(--border)" }}
+    className="px-4 py-3 text-left font-medium uppercase tracking-wider whitespace-nowrap"
+    style={{
+      borderBottom: "1px solid var(--border)",
+      color: "var(--muted)",
+      fontSize: 13,
+      ...extraStyle,
+    }}
   >
     {children}
   </th>
 );
 
-const TD = ({ children, cls = "" }: { children: React.ReactNode; cls?: string }) => (
+const TD = ({ children, style: extraStyle }: { children: React.ReactNode; style?: React.CSSProperties }) => (
   <td
-    className={`px-3 py-3 text-sm ${cls}`}
-    style={{ borderBottom: "1px solid #1e2030" }}
+    className="px-4 py-4"
+    style={{
+      borderBottom: "1px solid var(--border)",
+      fontSize: 15,
+      ...extraStyle,
+    }}
   >
     {children}
   </td>
@@ -185,7 +205,7 @@ const TD = ({ children, cls = "" }: { children: React.ReactNode; cls?: string })
 
 function DebugFormula({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mt-1 font-mono text-amber-400/70 leading-tight" style={{ fontSize: 10 }}>
+    <div className="mt-1 font-mono text-amber-400/70 leading-tight" style={{ fontSize: 11 }}>
       {children}
     </div>
   );
@@ -199,8 +219,11 @@ interface Props {
 export default function CandidatesTable({ stocks, debug = false }: Props) {
   if (stocks.length === 0) {
     return (
-      <div className="flex items-center justify-center h-48 text-slate-500">
-        No data — click Refresh Data to load candidates
+      <div
+        className="flex items-center justify-center rounded-lg"
+        style={{ height: 200, color: "var(--muted)", fontSize: 16, border: "1px solid var(--border)" }}
+      >
+        No data — tap Refresh to load
       </div>
     );
   }
@@ -213,68 +236,67 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
             <TH>#</TH>
             <TH>Symbol</TH>
             <TH>Price</TH>
-            <TH cls="min-w-[110px]">
-              I1 — From Open
-            </TH>
-            <TH cls="min-w-[120px]">
-              I2 — Day Change
-            </TH>
-            <TH cls="min-w-[130px]">
-              I3 — Range Pos.
-            </TH>
-            <TH cls="min-w-[200px]">
-              I4 — Trading Value (15d)
-            </TH>
-            <TH cls="min-w-[180px]">
-              I5 — ATH / 52W High
-            </TH>
+            <TH style={{ minWidth: 120 }}>I1 — Open</TH>
+            <TH style={{ minWidth: 130 }}>I2 — Change</TH>
+            <TH style={{ minWidth: 140 }}>I3 — Range</TH>
+            <TH style={{ minWidth: 220 }}>I4 — Volume (15d)</TH>
+            <TH style={{ minWidth: 190 }}>I5 — ATH / 52W</TH>
           </tr>
         </thead>
         <tbody>
           {stocks.map((stock) => (
             <tr
               key={stock.symbol}
-              className="transition-colors hover:bg-white/[0.02]"
+              className="transition-colors"
+              style={{ background: "transparent" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
               <TD>
-                <span className="text-slate-600 text-xs">{stock.rank}</span>
+                <span className="tabular-nums" style={{ color: "var(--muted)", fontSize: 14 }}>
+                  {stock.rank}
+                </span>
               </TD>
 
               <TD>
                 <div className="flex flex-col">
-                  <span className="font-bold text-white tracking-wide">{stock.symbol}</span>
+                  <span className="font-bold tracking-wide" style={{ color: "var(--text-bright)", fontSize: 16 }}>
+                    {stock.symbol}
+                  </span>
                   {stock.scrape_error && (
-                    <span className="text-amber-400 text-xs" title={stock.scrape_error}>
-                      ⚠ partial
+                    <span style={{ color: "var(--gold)", fontSize: 13 }} title={stock.scrape_error}>
+                      partial
                     </span>
                   )}
                 </div>
               </TD>
 
               <TD>
-                <span className="text-white font-medium">{fmtPrice(stock.rt_price)}</span>
+                <span className="tabular-nums font-semibold" style={{ color: "var(--text-bright)", fontSize: 16 }}>
+                  {fmtPrice(stock.rt_price)}
+                </span>
               </TD>
 
               {/* I1 */}
               <TD>
-                <span className={`font-semibold ${pctColor(stock.i1)}`}>
+                <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i1), fontSize: 15 }}>
                   {fmtPct(stock.i1)}
                 </span>
                 {debug && stock.open_price > 0 && (
                   <DebugFormula>
-                    ({stock.rt_price.toFixed(3)} − {stock.open_price.toFixed(3)}) / {stock.open_price.toFixed(3)}
+                    ({stock.rt_price.toFixed(2)} - {stock.open_price.toFixed(2)}) / {stock.open_price.toFixed(2)}
                   </DebugFormula>
                 )}
               </TD>
 
               {/* I2 */}
               <TD>
-                <span className={`font-semibold ${pctColor(stock.i2)}`}>
+                <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i2), fontSize: 15 }}>
                   {fmtPct(stock.i2)}
                 </span>
                 {debug && stock.prev_close > 0 && (
                   <DebugFormula>
-                    ({stock.rt_price.toFixed(3)} − {stock.prev_close.toFixed(3)}) / {stock.prev_close.toFixed(3)}
+                    ({stock.rt_price.toFixed(2)} - {stock.prev_close.toFixed(2)}) / {stock.prev_close.toFixed(2)}
                   </DebugFormula>
                 )}
               </TD>
@@ -284,7 +306,7 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
                 <I3Cell value={stock.i3} />
                 {debug && stock.open_price > 0 && stock.today_high > stock.open_price && (
                   <DebugFormula>
-                    ({stock.rt_price.toFixed(3)} − {stock.open_price.toFixed(3)}) / ({stock.today_high.toFixed(3)} − {stock.open_price.toFixed(3)})
+                    ({stock.rt_price.toFixed(2)} - {stock.open_price.toFixed(2)}) / ({stock.today_high.toFixed(2)} - {stock.open_price.toFixed(2)})
                   </DebugFormula>
                 )}
               </TD>
@@ -303,28 +325,24 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
         </tbody>
       </table>
 
-      {/* I6 footer — NASDAQ context applies to all stocks equally */}
+      {/* I6 footer */}
       {stocks.length > 0 && (
         <div
-          className="px-4 py-2 text-xs text-slate-500 flex flex-wrap gap-x-6 gap-y-1"
-          style={{ borderTop: "1px solid var(--border)", background: "var(--surface)" }}
+          className="px-4 py-3 flex flex-wrap gap-x-6 gap-y-1"
+          style={{ borderTop: "1px solid var(--border)", background: "var(--surface)", fontSize: 14 }}
         >
-          <div className="flex flex-col gap-0.5">
-            <span>
-              I6 — NASDAQ from open:{" "}
-              <span className={pctColor(stocks[0].i6.nasdaq_from_open_pct)}>
-                {fmtPct(stocks[0].i6.nasdaq_from_open_pct)}
-              </span>
+          <span style={{ color: "var(--muted)" }}>
+            I6 — NASDAQ from open:{" "}
+            <span className="tabular-nums font-semibold" style={{ color: pctColor(stocks[0].i6.nasdaq_from_open_pct) }}>
+              {fmtPct(stocks[0].i6.nasdaq_from_open_pct)}
             </span>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span>
-              NASDAQ from prev close:{" "}
-              <span className={pctColor(stocks[0].i6.nasdaq_from_prev_close_pct)}>
-                {fmtPct(stocks[0].i6.nasdaq_from_prev_close_pct)}
-              </span>
+          </span>
+          <span style={{ color: "var(--muted)" }}>
+            from prev close:{" "}
+            <span className="tabular-nums font-semibold" style={{ color: pctColor(stocks[0].i6.nasdaq_from_prev_close_pct) }}>
+              {fmtPct(stocks[0].i6.nasdaq_from_prev_close_pct)}
             </span>
-          </div>
+          </span>
         </div>
       )}
     </div>
