@@ -81,64 +81,6 @@ def _yf_volumes(symbols: list[str]) -> dict[str, float]:
         return {s: 0.0 for s in symbols}
 
 
-def _yf_intraday_turnover(
-    symbols: list[str],
-    interval: str = "15m",
-    period: str = "60d",
-) -> dict[str, dict[date, float]]:
-    """Bar-aggregated turnover per symbol per trading day.
-
-    For each intraday bar: typical price (H+L+C)/3 × bar volume, summed by ET
-    trading date. This Σ(price×volume) is a true turnover estimate — far closer
-    to exchange-reported turnover than daily close×volume, which over/under-states
-    on volatile days. 15m/60d covers I4's 15-day window in one batched download.
-
-    Returns {} on any failure so callers fall back to the close×volume basis.
-    """
-    if not symbols:
-        return {}
-    try:
-        df = yf.download(
-            symbols, period=period, interval=interval,
-            auto_adjust=False, group_by="ticker", progress=False, threads=True,
-        )
-    except Exception as exc:
-        logger.warning("yfinance intraday turnover download failed: %s", exc)
-        return {}
-    if df is None or df.empty:
-        return {}
-
-    out: dict[str, dict[date, float]] = {}
-    for s in symbols:
-        try:
-            # group_by="ticker": columns are a MultiIndex (symbol, field) for
-            # multiple symbols, but a plain Index for a single symbol.
-            sub = df[s] if isinstance(df.columns, pd.MultiIndex) else df
-            sub = sub.dropna(subset=["Close", "Volume", "High", "Low"])
-            if sub.empty:
-                out[s] = {}
-                continue
-            typical = (sub["High"] + sub["Low"] + sub["Close"]) / 3.0
-            bar_tv = typical * sub["Volume"]
-            # Intraday index is tz-aware (exchange tz); normalise to ET dates.
-            idx = sub.index
-            local = idx.tz_convert(_ET) if idx.tz is not None else idx
-            by_date: dict[date, float] = {}
-            for d, v in zip((ts.date() for ts in local), bar_tv):
-                if pd.notna(v):
-                    by_date[d] = by_date.get(d, 0.0) + float(v)
-            out[s] = by_date
-        except Exception as exc:
-            logger.warning("intraday turnover parse failed for %s: %s", s, exc)
-            out[s] = {}
-    return out
-
-
-async def get_intraday_turnover(symbols: list[str]) -> dict[str, dict[date, float]]:
-    """Async wrapper around the batched intraday turnover download."""
-    if settings.scraper_mock_mode or not symbols:
-        return {}
-    return await asyncio.to_thread(_yf_intraday_turnover, symbols)
 
 
 def _build_snapshot(symbol: str, quote: dict, volume: float) -> StockSnapshot:

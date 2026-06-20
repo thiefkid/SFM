@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # Finnhub — used for per-stock quotes (price/open/high/low/prev_close)
     finnhub_api_key: str = ""
 
+    # Polygon.io — authoritative daily turnover (v × vw from consolidated tape)
+    polygon_api_key: str = ""
+
     # CORS — comma-separated list of allowed origins, or * for all
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

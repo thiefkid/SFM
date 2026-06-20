@@ -12,6 +12,6 @@ This is a very important trading application that directly has PNL impact on tra
 - **Backend**: FastAPI on Cloud Run (scale-to-zero compatible)
 - **Frontend**: Next.js
 - **Database**: Neon Postgres (daily prices, last refresh persistence, distributed lock)
-- **Data sources**: Finnhub (realtime quotes), yfinance (volume, NASDAQ, intraday turnover), Futu scraper (Heat List ranking)
+- **Data sources**: Finnhub (realtime quotes), Polygon.io (authoritative daily turnover), yfinance (volume, NASDAQ), Futu scraper (Heat List ranking)
 - **Refresh**: Backend-driven via GCP Cloud Scheduler (every 2 min, 3:40-4:00 PM ET weekdays). SSE push to frontend. Single-flight distributed DB lock.
-- **Turnover**: Bar-aggregated VWAP from 15m intraday bars: Σ((H+L+C)/3 × bar_volume). Fallback to close×volume.
+- **Turnover**: Polygon.io daily v × vw (tape-derived, authoritative). Cached per process — settled bars never change. Fallback to close×volume from DB.

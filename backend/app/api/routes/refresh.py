@@ -22,6 +22,7 @@ from app.core.database import async_session
 from app.models.last_refresh import LastRefresh
 from app.services import indicators as ind_engine
 from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
+from app.services import polygon as polygon_service
 from app.services import quotes as quote_service
 from app.services.historical import (
     ATHResult, PastValuesResult, YearHighResult,
@@ -339,28 +340,28 @@ async def _get_nasdaq() -> NasdaqSnapshot:
     return await quote_service.get_nasdaq_snapshot()
 
 
-def _i4_from_intraday(
-    intraday: dict[date, float],
+def _i4_from_polygon(
+    polygon: dict[date, float],
     today: date,
     db_history: PastValuesResult,
     snapshot: StockSnapshot,
 ) -> tuple[PastValuesResult, float]:
-    """Prefer bar-aggregated turnover (true VWAP basis) for I4; fall back to DB.
+    """Prefer Polygon tape-derived turnover (v × vw) for I4; fall back to DB.
 
     Returns (history, today_value). History and today are taken from the *same*
-    basis so the bar chart is apples-to-apples: if there's enough intraday
-    history we use it for both; otherwise we keep the DB close×volume history
-    and the snapshot's close×volume today.
+    basis so the bar chart is apples-to-apples: if Polygon has enough settled
+    days we use those; otherwise we keep the DB close×volume history.
+    Today's value uses Polygon if available (15-min delayed on free tier),
+    else falls back to the snapshot's close×volume.
     """
-    completed = sorted(d for d in intraday if d < today)
+    completed = sorted(d for d in polygon if d < today)
     if len(completed) >= 3:
         last = completed[-15:]
-        values = [intraday[d] for d in last]
+        values = [polygon[d] for d in last]
         avg = sum(values) / len(values) if values else 0.0
         history = PastValuesResult(values=values, avg=avg, count=len(values), dates=last)
-        today_value = intraday.get(today, snapshot.today_value)
+        today_value = polygon.get(today, snapshot.today_value)
         return history, today_value
-    # Not enough intraday history → stay on the existing close×volume basis.
     return db_history, snapshot.today_value
 
 
@@ -369,7 +370,7 @@ async def _process_symbol(
     snapshot: StockSnapshot,
     nasdaq: NasdaqSnapshot,
     now_et: datetime,
-    intraday_turnover: dict[date, float] | None = None,
+    polygon_turnover: dict[date, float] | None = None,
 ) -> ind_engine.StockIndicators:
     """Ensure complete history, then compute all indicators."""
     if settings.scraper_mock_mode:
@@ -383,9 +384,9 @@ async def _process_symbol(
             get_ath_status(symbol, snapshot.today_high, now_et),
             get_year_high(symbol, snapshot.today_high, now_et),
         )
-        # Upgrade I4 to the accurate bar-aggregated turnover when available.
-        history, today_value = _i4_from_intraday(
-            intraday_turnover or {}, now_et.date(), history, snapshot
+        # Upgrade I4 to Polygon's authoritative turnover (v × vw from tape).
+        history, today_value = _i4_from_polygon(
+            polygon_turnover or {}, now_et.date(), history, snapshot
         )
         snapshot = replace(snapshot, today_value=today_value)
     return ind_engine.compute_all(
@@ -445,9 +446,9 @@ async def _do_refresh() -> RefreshResponse:
     if all(s.error for s in snapshots):
         raise HTTPException(status_code=502, detail=f"All quote fetches failed: {snapshots[0].error}")
 
-    # Step 2b: one batched intraday pull → accurate bar-aggregated turnover for
-    # I4 (true VWAP basis). Empty dict on failure → close×volume fallback.
-    intraday_turnover = await quote_service.get_intraday_turnover(symbols)
+    # Step 2b: authoritative daily turnover from Polygon (v × vw from tape).
+    # Empty dict on failure → close×volume fallback via DB history.
+    polygon_turnover = await polygon_service.get_daily_turnover(symbols)
 
     # Step 3+4: backfill history + compute indicators for each symbol.
     # One shared "now" so freshness, ATH and 52-week high all agree on the clock.
@@ -455,7 +456,7 @@ async def _do_refresh() -> RefreshResponse:
     tasks = [
         _process_symbol(
             snap.symbol, snap, nasdaq, now_et,
-            intraday_turnover.get(snap.symbol),
+            polygon_turnover.get(snap.symbol),
         )
         for snap in snapshots
     ]
