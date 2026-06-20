@@ -60,6 +60,26 @@ export default function DashboardPage() {
       setRefreshing(false);
     });
 
+    es.addEventListener("events_update", (e: MessageEvent) => {
+      try {
+        const eventsMap = JSON.parse(e.data) as Record<string, {
+          next_earnings_date: string | null;
+          next_dividend_date: string | null;
+          ex_dividend_date: string | null;
+        }>;
+        setData((prev) => {
+          if (!prev?.stocks) return prev;
+          return {
+            ...prev,
+            stocks: prev.stocks.map((s) => {
+              const ev = eventsMap[s.symbol];
+              return ev ? { ...s, ...ev } : s;
+            }),
+          };
+        });
+      } catch { /* ignore */ }
+    });
+
     es.addEventListener("status", (e: MessageEvent) => {
       try {
         const status = JSON.parse(e.data);

@@ -473,13 +473,9 @@ async def _do_refresh() -> RefreshResponse:
     if all(s.error for s in snapshots):
         raise HTTPException(status_code=502, detail=f"All quote fetches failed: {snapshots[0].error}")
 
-    # Step 2b: authoritative daily turnover from Polygon (v × vw from tape) and
-    # upcoming events (earnings + dividends) fetched concurrently. Both degrade
-    # gracefully: empty turnover → DB close×volume fallback; missing events → null.
-    polygon_turnover, upcoming_events = await asyncio.gather(
-        polygon_service.get_daily_turnover(symbols),
-        earnings_service.get_upcoming_events(symbols),
-    )
+    # Step 2b: authoritative daily turnover from Polygon (v × vw from tape).
+    # Degrades gracefully: empty turnover → DB close×volume fallback.
+    polygon_turnover = await polygon_service.get_daily_turnover(symbols)
 
     # One shared "now" so freshness, ATH, 52-week high and session all agree.
     now_et = _now_et()
@@ -532,16 +528,8 @@ async def _do_refresh() -> RefreshResponse:
         error=nasdaq.error,
     )
 
-    from app.services.earnings import UpcomingEvents as _UE
-    _empty = _UE()
     stock_results = [
-        _build_stock_result(
-            rank=i + 1,
-            indicators=ind,
-            next_earnings=(ev := upcoming_events.get(ind.symbol, _empty)).next_earnings,
-            next_dividend=ev.next_dividend,
-            ex_dividend=ev.ex_dividend,
-        )
+        _build_stock_result(rank=i + 1, indicators=ind)
         for i, ind in enumerate(all_indicators)
     ]
 
@@ -557,7 +545,41 @@ async def _do_refresh() -> RefreshResponse:
     _last_result = response.model_dump()
     await _persist_last(_last_result)
     await _broadcast({"type": "refresh_done", "data": _last_result})
+
+    # Fire-and-forget: fetch earnings/dividend dates in background, push via SSE.
+    result_symbols = [s.symbol for s in stock_results]
+    asyncio.create_task(_fetch_and_push_events(result_symbols))
+
     return response
+
+
+async def _fetch_and_push_events(symbols: list[str]) -> None:
+    """Background task: fetch upcoming events and push to all SSE clients."""
+    global _last_result
+    try:
+        upcoming = await earnings_service.get_upcoming_events(symbols)
+        # Build a {symbol: {next_earnings_date, next_dividend_date, ex_dividend_date}} map
+        events_data: dict[str, dict[str, str | None]] = {}
+        for sym in symbols:
+            ev = upcoming.get(sym)
+            if ev is None:
+                continue
+            events_data[sym] = {
+                "next_earnings_date": _fmt_date(ev.next_earnings),
+                "next_dividend_date": _fmt_date(ev.next_dividend),
+                "ex_dividend_date": _fmt_date(ev.ex_dividend),
+            }
+        # Merge into cached last_result so /last also has the data
+        if _last_result and _last_result.get("stocks"):
+            for stock in _last_result["stocks"]:
+                sym_events = events_data.get(stock["symbol"])
+                if sym_events:
+                    stock.update(sym_events)
+            await _persist_last(_last_result)
+        await _broadcast({"type": "events_update", "data": events_data})
+        logger.info("Background events push: %d symbols", len(events_data))
+    except Exception as exc:
+        logger.warning("Background events fetch failed: %s", exc)
 
 
 @router.get("/last", response_model=RefreshResponse)
@@ -618,6 +640,8 @@ async def events(request: Request):
                     yield {"event": "refresh_start", "data": "{}"}
                 elif state.get("type") == "refresh_done":
                     yield {"event": "refresh_done", "data": json.dumps(state.get("data", {}))}
+                elif state.get("type") == "events_update":
+                    yield {"event": "events_update", "data": json.dumps(state.get("data", {}))}
             except asyncio.TimeoutError:
                 pass
 
