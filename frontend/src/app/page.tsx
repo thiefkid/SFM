@@ -81,18 +81,18 @@ export default function DashboardPage() {
     <div className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
       {/* Header — centered branding, compact refresh */}
       <header
-        className="relative flex flex-col items-center px-4 sm:px-6 pt-safe pb-3 sm:pb-4 border-b"
+        className="flex flex-col items-center px-4 sm:px-6 pt-safe pb-3 sm:pb-4 border-b"
         style={{ background: "var(--surface)", borderColor: "var(--border)" }}
       >
-        <div className="absolute top-4 right-4 sm:top-5 sm:right-6">
+        <div className="flex items-center gap-3 w-full justify-center">
+          <h1
+            className="text-2xl sm:text-3xl font-bold tracking-[0.25em]"
+            style={{ color: "var(--text-bright)" }}
+          >
+            SFM
+          </h1>
           <RefreshButton loading={refreshing} onClick={runRefresh} />
         </div>
-        <h1
-          className="text-2xl sm:text-3xl font-bold tracking-[0.25em]"
-          style={{ color: "var(--text-bright)" }}
-        >
-          SFM
-        </h1>
         <p className="text-xs sm:text-sm mt-1 italic" style={{ color: "var(--muted)" }}>
           Patience compounds; conviction endures.
         </p>
