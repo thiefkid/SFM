@@ -141,9 +141,9 @@ export default function DashboardPage() {
             Close = real-time price during session · official closing price after market close · tap any indicator to see its formula
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-1" style={{ color: "var(--muted)" }}>
-            <span><span style={{ color: "var(--text)" }}>I1</span> — Candle Body: (close − open) / open</span>
-            <span><span style={{ color: "var(--text)" }}>I2</span> — Full-Day Gain: (close − prev close) / prev close</span>
-            <span><span style={{ color: "var(--text)" }}>I3</span> — Close in Range: (close − open) / (high − open) · 1.0 = at high, 0 = at open</span>
+            <span><span style={{ color: "var(--text)" }}>I1</span> — Close vs Open: (close − open) / open</span>
+            <span><span style={{ color: "var(--text)" }}>I2</span> — Close vs Prev Close: (close − prev close) / prev close</span>
+            <span><span style={{ color: "var(--text)" }}>I3</span> — Close in Candle: (close − open) / (high − open) · 1.0 = at high, 0 = at open</span>
             <span><span style={{ color: "var(--text)" }}>I4</span> — 15-day trading value history + today (highlighted) · yellow if &gt;1.5× avg</span>
             <span><span style={{ color: "var(--text)" }}>I5</span> — all-time high + 52-week high price &amp; date</span>
             <span><span style={{ color: "var(--text)" }}>I6</span> — NASDAQ % change (shown in table footer)</span>

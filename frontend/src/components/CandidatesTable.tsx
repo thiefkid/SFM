@@ -476,13 +476,13 @@ function StockCard({ stock }: { stock: StockResult }) {
 
       {/* I1 / I2 / I3 — tap any value to see formula */}
       <div className="grid grid-cols-3 gap-3">
-        <CardStat label="I1 · Body">
+        <CardStat label="I1 · vs Open">
           <TappablePct value={stock.i1} formula={i1Formula(stock)} />
         </CardStat>
-        <CardStat label="I2 · Gain">
+        <CardStat label="I2 · vs Prev">
           <TappablePct value={stock.i2} formula={i2Formula(stock)} />
         </CardStat>
-        <CardStat label="I3 · Range">
+        <CardStat label="I3 · in Candle">
           <TappableI3 value={stock.i3} formula={i3Formula(stock)} />
         </CardStat>
       </div>
@@ -573,9 +573,9 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
               <TH>#</TH>
               <TH>Symbol</TH>
               <TH>Price</TH>
-              <TH style={{ minWidth: 140 }}>I1 — Candle Body</TH>
-              <TH style={{ minWidth: 140 }}>I2 — Day Gain</TH>
-              <TH style={{ minWidth: 150 }}>I3 — Close in Range</TH>
+              <TH style={{ minWidth: 150 }}>I1 — Close vs Open</TH>
+              <TH style={{ minWidth: 160 }}>I2 — Close vs Prev</TH>
+              <TH style={{ minWidth: 160 }}>I3 — Close in Candle</TH>
               <TH style={{ minWidth: 220 }}>I4 — Volume (15d)</TH>
               <TH style={{ minWidth: 190 }}>I5 — ATH / 52W</TH>
             </tr>
