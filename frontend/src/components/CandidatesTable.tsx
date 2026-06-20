@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { StockResult } from "@/types/dashboard";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,8 @@ function fmtTooltipDate(isoDate: string | null): string {
 function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_date }: StockResult["i4"]) {
   const allValues = [...past_values, today_value];
   const maxVal = Math.max(...allValues, 1);
+  const [activeBar, setActiveBar] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const todayColor =
     ratio !== null && ratio >= 1.5
@@ -93,32 +96,79 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
       ? "var(--blue)"
       : "var(--muted)";
 
+  const totalBars = past_values.length + 1;
+  const todayIndex = past_values.length;
+
+  const getTooltipText = useCallback((index: number): string => {
+    if (index === todayIndex) {
+      return `${today_date ? fmtTooltipDate(today_date) : "Today"} (today) · ${fmtValue(today_value)}`;
+    }
+    return `${fmtTooltipDate(dates[index] ?? null)} · ${fmtValue(past_values[index])}`;
+  }, [todayIndex, today_date, today_value, dates, past_values]);
+
+  useEffect(() => {
+    if (activeBar === null) return;
+    const handleOutside = (e: TouchEvent | MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setActiveBar(null);
+      }
+    };
+    document.addEventListener("touchstart", handleOutside);
+    document.addEventListener("mousedown", handleOutside);
+    return () => {
+      document.removeEventListener("touchstart", handleOutside);
+      document.removeEventListener("mousedown", handleOutside);
+    };
+  }, [activeBar]);
+
   return (
-    <div className="flex flex-col gap-1.5" style={{ minWidth: 200 }}>
-      <div className="flex items-end gap-px" style={{ height: 36 }}>
+    <div className="flex flex-col gap-1.5" style={{ minWidth: 200 }} ref={containerRef}>
+      <div className="relative flex items-end gap-px" style={{ height: 36 }}>
         {past_values.map((v, i) => {
           const heightPct = (v / maxVal) * 100;
           return (
             <div
               key={i}
-              className="flex-1 rounded-sm transition-colors"
+              className="flex-1 rounded-sm transition-colors cursor-pointer"
               style={{
                 height: `${Math.max(4, heightPct)}%`,
-                background: "var(--muted)",
-                opacity: 0.5,
+                background: activeBar === i ? "var(--blue)" : "var(--muted)",
+                opacity: activeBar === i ? 1 : 0.5,
               }}
-              title={`${fmtTooltipDate(dates[i] ?? null)} · ${fmtValue(v)}`}
+              title={getTooltipText(i)}
+              onClick={() => setActiveBar(activeBar === i ? null : i)}
+              onMouseEnter={() => setActiveBar(i)}
+              onMouseLeave={() => setActiveBar(null)}
             />
           );
         })}
         <div
-          className="flex-1 rounded-sm"
+          className="flex-1 rounded-sm cursor-pointer"
           style={{
             height: `${Math.max(4, (today_value / maxVal) * 100)}%`,
-            background: todayColor,
+            background: activeBar === todayIndex ? "var(--blue)" : todayColor,
           }}
-          title={`${today_date ? fmtTooltipDate(today_date) : "Today"} (today) · ${fmtValue(today_value)}`}
+          title={getTooltipText(todayIndex)}
+          onClick={() => setActiveBar(activeBar === todayIndex ? null : todayIndex)}
+          onMouseEnter={() => setActiveBar(todayIndex)}
+          onMouseLeave={() => setActiveBar(null)}
         />
+
+        {activeBar !== null && (
+          <div
+            className="absolute left-0 right-0 text-center rounded px-2 py-1 pointer-events-none whitespace-nowrap z-10"
+            style={{
+              bottom: "calc(100% + 4px)",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              color: "var(--text-bright)",
+              fontSize: 12,
+              lineHeight: "1.3",
+            }}
+          >
+            {getTooltipText(activeBar)}
+          </div>
+        )}
       </div>
       <div className="flex items-center justify-between text-sm">
         <span style={{ color: "var(--muted)" }}>{day_count}d avg: {fmtValue(avg)}</span>
