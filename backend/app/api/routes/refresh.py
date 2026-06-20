@@ -7,12 +7,13 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
@@ -180,25 +181,76 @@ async def _broadcast(state: dict[str, Any]) -> None:
         _sse_cond.notify_all()
 
 
-async def _set_refreshing(flag: bool) -> None:
-    """Mark the DB row so SSE clients on other instances see it too."""
+# A refresh that hangs longer than this lets the next caller steal the lock,
+# so a crashed pipeline can never wedge refreshes permanently. Comfortably
+# above the worst-case pipeline runtime (~60-90s) and the scraper timeouts.
+_LOCK_STALE_AFTER = timedelta(minutes=3)
+
+
+async def _acquire_lock() -> bool:
+    """Atomically claim the single-flight refresh lock across all instances.
+
+    Returns True if this caller acquired it, False if a refresh is already
+    running elsewhere (another tab, another user, or the cron job). The atomic
+    UPDATE ... WHERE means exactly one concurrent caller can win.
+    """
+    if settings.scraper_mock_mode:
+        return True
+    now = datetime.now(tz=timezone.utc)
+    stale_before = now - _LOCK_STALE_AFTER
+    try:
+        async with async_session() as session:
+            # Claim only if not currently refreshing, or the existing lock is stale.
+            result = await session.execute(
+                update(LastRefresh)
+                .where(
+                    LastRefresh.id == 1,
+                    or_(
+                        LastRefresh.is_refreshing.is_(False),
+                        LastRefresh.refresh_started_at.is_(None),
+                        LastRefresh.refresh_started_at < stale_before,
+                    ),
+                )
+                .values(is_refreshing=True, refresh_started_at=now)
+            )
+            if result.rowcount == 1:
+                await session.commit()
+                return True
+
+            # rowcount 0 → either the row doesn't exist yet (first run) or the
+            # lock is genuinely held. Try to insert; if it already exists, held.
+            await session.rollback()
+            if await session.get(LastRefresh, 1) is None:
+                try:
+                    session.add(LastRefresh(
+                        id=1, payload="{}", refreshed_at=now,
+                        is_refreshing=True, refresh_started_at=now,
+                    ))
+                    await session.commit()
+                    return True
+                except IntegrityError:
+                    await session.rollback()  # lost the insert race
+            return False
+    except Exception as exc:
+        logger.warning("Failed to acquire refresh lock: %s", exc)
+        # On DB failure, don't block refreshes entirely — fall back to allowing.
+        return True
+
+
+async def _release_lock() -> None:
+    """Clear the lock (failure path). Success path clears it via _persist_last."""
     if settings.scraper_mock_mode:
         return
     try:
         async with async_session() as session:
-            row = await session.get(LastRefresh, 1)
-            if row is not None:
-                row.is_refreshing = flag
-                await session.commit()
-            elif flag:
-                session.add(LastRefresh(
-                    id=1, payload="{}",
-                    refreshed_at=datetime.now(tz=timezone.utc),
-                    is_refreshing=True,
-                ))
-                await session.commit()
+            await session.execute(
+                update(LastRefresh)
+                .where(LastRefresh.id == 1)
+                .values(is_refreshing=False)
+            )
+            await session.commit()
     except Exception as exc:
-        logger.warning("Failed to set is_refreshing=%s: %s", flag, exc)
+        logger.warning("Failed to release refresh lock: %s", exc)
 
 
 async def _persist_last(payload: dict[str, Any]) -> None:
@@ -233,7 +285,11 @@ async def _load_last() -> dict[str, Any] | None:
         async with async_session() as session:
             row = (await session.execute(select(LastRefresh).limit(1))).scalar_one_or_none()
             if row is not None:
-                return json.loads(row.payload)
+                parsed = json.loads(row.payload)
+                # A row created purely to hold the lock (first ever run) has an
+                # empty "{}" payload — treat that as "no data yet", not a result.
+                if isinstance(parsed, dict) and parsed.get("stocks"):
+                    return parsed
     except Exception as exc:
         logger.warning("Failed to load last_refresh from DB: %s", exc)
     return None
@@ -314,15 +370,20 @@ async def refresh() -> RefreshResponse:
     """
     global _last_result
 
-    # Signal SSE clients: refresh in progress (in-memory + DB for cross-instance)
+    # Single-flight: only one refresh may run at a time across all instances,
+    # whether triggered by a user click or the cron job. If one is already
+    # running, return 409 — the caller will receive the result via SSE.
+    if not await _acquire_lock():
+        raise HTTPException(status_code=409, detail="A refresh is already in progress")
+
+    # Signal SSE clients (this instance instantly; other instances via DB poll).
     await _broadcast({"type": "refresh_start"})
-    await _set_refreshing(True)
 
     try:
         return await _do_refresh()
     except Exception:
+        await _release_lock()
         await _broadcast({"type": "idle"})
-        await _set_refreshing(False)
         raise
 
 

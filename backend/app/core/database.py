@@ -39,6 +39,19 @@ class Base(DeclarativeBase):
 async def create_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all only creates missing tables — it never adds columns to an
+        # existing one. Apply idempotent ALTERs so columns added after a table
+        # was first created land on already-deployed databases too.
+        if not _is_local:  # Postgres (Neon)
+            from sqlalchemy import text as _text
+            await conn.execute(_text(
+                "ALTER TABLE last_refresh "
+                "ADD COLUMN IF NOT EXISTS is_refreshing BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            await conn.execute(_text(
+                "ALTER TABLE last_refresh "
+                "ADD COLUMN IF NOT EXISTS refresh_started_at TIMESTAMPTZ"
+            ))
 
 
 async def get_session() -> AsyncSession:  # type: ignore[return]

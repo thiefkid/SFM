@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CandidatesTable from "@/components/CandidatesTable";
 import MarketBar from "@/components/MarketBar";
 import RefreshButton from "@/components/RefreshButton";
-import { fetchLast, fetchRefresh } from "@/lib/api";
+import { fetchLast, fetchRefresh, REFRESH_IN_PROGRESS } from "@/lib/api";
 import type { DashboardData } from "@/types/dashboard";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -17,8 +17,9 @@ export default function DashboardPage() {
   const [debug, setDebug] = useState(false);
   const refreshingRef = useRef(false);
 
-  // Manual refresh (button click). The backend broadcasts SSE events for this
-  // too, but we also handle the response directly for error feedback.
+  // Manual refresh (button click). The backend enforces single-flight: if a
+  // refresh (cron or another tab) is already running it returns 409, and the
+  // result arrives over SSE — so we keep the indicator on and wait, no error.
   const runRefresh = useCallback(async () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -26,12 +27,18 @@ export default function DashboardPage() {
     setError(null);
     try {
       const result = await fetchRefresh();
+      if (result === REFRESH_IN_PROGRESS) {
+        // Another refresh owns the lock; SSE will deliver refresh_done. Leave
+        // the indicator on; the SSE handler flips it off when data arrives.
+        return;
+      }
       setData(result);
+      setRefreshing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+      setRefreshing(false);
     } finally {
       refreshingRef.current = false;
-      setRefreshing(false);
     }
   }, []);
 
