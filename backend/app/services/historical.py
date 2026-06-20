@@ -85,6 +85,7 @@ class PastValuesResult:
     values: list[float]         # up to 15 most recent trading days, oldest → newest
     avg: float
     count: int                  # actual days available (may be < 15 for new listings)
+    dates: list[date]           # trading date for each value (parallel to `values`)
 
 
 @dataclass
@@ -253,11 +254,11 @@ async def get_ath_status(
 
 
 async def get_past_values(symbol: str, days: int = 15) -> PastValuesResult:
-    """Return past N trading days' trading values, ordered oldest → newest."""
+    """Return past N trading days' trading values + dates, ordered oldest → newest."""
     async with async_session() as session:
         result = await session.execute(
             text("""
-                SELECT trading_value
+                SELECT trading_value, date
                 FROM daily_prices
                 WHERE symbol = :symbol AND trading_value IS NOT NULL
                 ORDER BY date DESC
@@ -265,12 +266,12 @@ async def get_past_values(symbol: str, days: int = 15) -> PastValuesResult:
             """),
             {"symbol": symbol, "days": days},
         )
-        rows = result.fetchall()
+        rows = list(reversed(result.fetchall()))  # oldest → newest (left → right)
 
-    # Reverse so values go oldest → newest (left → right on chart)
-    values = [float(r[0]) for r in reversed(rows)]
+    values = [float(r[0]) for r in rows]
+    dates = [r[1] for r in rows]
     avg = sum(values) / len(values) if values else 0.0
-    return PastValuesResult(values=values, avg=avg, count=len(values))
+    return PastValuesResult(values=values, avg=avg, count=len(values), dates=dates)
 
 
 async def get_year_high(

@@ -55,6 +55,8 @@ class I4Model(BaseModel):
     avg: float
     ratio: float | None
     day_count: int
+    dates: list[str]            # ISO trading date per past value (for tooltips)
+    today_date: str | None      # ISO date of today's (live) bar
 
 
 class I5Model(BaseModel):
@@ -135,6 +137,8 @@ def _build_stock_result(rank: int, indicators: ind_engine.StockIndicators) -> St
             avg=i4.avg,
             ratio=i4.ratio,
             day_count=i4.day_count,
+            dates=i4.dates,
+            today_date=i4.today_date,
         ),
         i5=I5Model(
             is_ath=i5.is_ath,
@@ -159,7 +163,8 @@ def _mock_history(symbol: str) -> tuple[PastValuesResult, ATHResult, YearHighRes
     base = 1_000_000_000 + rng.randint(0, 2_000_000_000)
     past = [base * (0.8 + rng.random() * 0.4) for _ in range(15)]
     avg = sum(past) / len(past)
-    history = PastValuesResult(values=past, avg=avg, count=15)
+    past_dates = [date.today() - timedelta(days=15 - i) for i in range(15)]
+    history = PastValuesResult(values=past, avg=avg, count=15, dates=past_dates)
     ath_date = date.today() - timedelta(days=rng.randint(30, 500))
     ath = ATHResult(
         is_ath=rng.random() < 0.2,
@@ -351,7 +356,10 @@ async def _process_symbol(
             get_ath_status(symbol, snapshot.today_high, now_et),
             get_year_high(symbol, snapshot.today_high, now_et),
         )
-    return ind_engine.compute_all(snapshot, history, ath, year_high, nasdaq)
+    return ind_engine.compute_all(
+        snapshot, history, ath, year_high, nasdaq,
+        today_date=now_et.date().isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------

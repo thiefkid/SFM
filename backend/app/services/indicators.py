@@ -27,6 +27,8 @@ class I4Result:
     avg: float
     ratio: float | None         # today / avg; None if avg is 0
     day_count: int              # actual days of history available
+    dates: list[str]            # ISO trading date per past value (for tooltips)
+    today_date: str | None      # ISO date of today's (live) bar
 
 
 @dataclass
@@ -96,7 +98,11 @@ def compute_i3(rt_price: float, open_price: float, today_high: float) -> float |
     return (rt_price - open_price) / denominator
 
 
-def compute_i4(today_value: float, history: PastValuesResult) -> I4Result:
+def compute_i4(
+    today_value: float,
+    history: PastValuesResult,
+    today_date: str | None = None,
+) -> I4Result:
     """Today's trading value vs past 15 days (for bar chart)."""
     ratio = (today_value / history.avg) if history.avg > 0 else None
     return I4Result(
@@ -105,6 +111,8 @@ def compute_i4(today_value: float, history: PastValuesResult) -> I4Result:
         avg=history.avg,
         ratio=ratio,
         day_count=history.count,
+        dates=[d.isoformat() for d in history.dates],
+        today_date=today_date,
     )
 
 
@@ -158,6 +166,7 @@ def compute_all(
     ath: ATHResult | None,
     year_high: YearHighResult | None,
     nasdaq: NasdaqSnapshot,
+    today_date: str | None = None,
 ) -> StockIndicators:
     """Compute all 6 indicators for a single stock."""
     return StockIndicators(
@@ -171,7 +180,7 @@ def compute_all(
         i1=compute_i1(snapshot.rt_price, snapshot.open_price),
         i2=compute_i2(snapshot.rt_price, snapshot.prev_close),
         i3=compute_i3(snapshot.rt_price, snapshot.open_price, snapshot.today_high),
-        i4=compute_i4(snapshot.today_value, history),
+        i4=compute_i4(snapshot.today_value, history, today_date),
         i5=compute_i5(ath, year_high),
         i6=compute_i6(nasdaq),
     )

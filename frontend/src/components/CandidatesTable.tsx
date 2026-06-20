@@ -72,7 +72,17 @@ function I3Cell({ value }: { value: number | null }) {
   );
 }
 
-function I4Cell({ today_value, past_values, avg, ratio, day_count }: StockResult["i4"]) {
+function fmtTooltipDate(isoDate: string | null): string {
+  if (!isoDate) return "—";
+  // Parse as date-only to avoid TZ shifting (e.g. "2026-06-13" → Jun 13).
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (!y || !m || !d) return isoDate;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    weekday: "short", month: "short", day: "numeric",
+  });
+}
+
+function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_date }: StockResult["i4"]) {
   const allValues = [...past_values, today_value];
   const maxVal = Math.max(...allValues, 1);
 
@@ -97,7 +107,7 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count }: StockResult
                 background: "var(--muted)",
                 opacity: 0.5,
               }}
-              title={fmtValue(v)}
+              title={`${fmtTooltipDate(dates[i] ?? null)} · ${fmtValue(v)}`}
             />
           );
         })}
@@ -107,7 +117,7 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count }: StockResult
             height: `${Math.max(4, (today_value / maxVal) * 100)}%`,
             background: todayColor,
           }}
-          title={`Today: ${fmtValue(today_value)}`}
+          title={`${today_date ? fmtTooltipDate(today_date) : "Today"} (today) · ${fmtValue(today_value)}`}
         />
       </div>
       <div className="flex items-center justify-between text-sm">

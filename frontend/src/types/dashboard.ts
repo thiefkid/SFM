@@ -4,6 +4,8 @@ export interface I4 {
   avg: number;
   ratio: number | null;
   day_count: number;
+  dates: string[];            // ISO trading date per past value (for tooltips)
+  today_date: string | null;  // ISO date of today's (live) bar
 }
 
 export interface I5 {
