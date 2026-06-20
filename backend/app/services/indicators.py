@@ -88,12 +88,19 @@ def compute_i2(rt_price: float, prev_close: float) -> float | None:
 
 def compute_i3(rt_price: float, open_price: float, today_high: float) -> float | None:
     """
-    (RT - open) / (today high - open)
-    Returns None when high == open (no intraday range yet — pre-market or just opened).
-    Returns negative when RT price is below open.
+    (RT - open) / (high - open), bounded so the result can never exceed 1.0.
+
+    The intraday high can never be below the last/RT price; when the high feed
+    lags (high < RT) the RT price itself IS the real high, so the effective high
+    is max(today_high, rt_price). 1.0 = price at the day's high, 0 = at the open,
+    negative = below the open.
+
+    Returns None when there is no positive range above the open (pre-market,
+    just opened, or the stock has only traded at/below its open).
     """
-    denominator = today_high - open_price
-    if denominator == 0:
+    effective_high = max(today_high, rt_price)
+    denominator = effective_high - open_price
+    if denominator <= 0:
         return None
     return (rt_price - open_price) / denominator
 

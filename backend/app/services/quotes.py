@@ -87,13 +87,19 @@ def _build_snapshot(symbol: str, quote: dict, volume: float) -> StockSnapshot:
     if not quote.get("c"):
         return _make_fallback_snapshot(symbol, "Finnhub returned empty quote")
     price = float(quote["c"])
+    raw_high = float(quote.get("h") or 0.0)
+    raw_low = float(quote.get("l") or 0.0)
+    # Finnhub's high/low can lag the last price (notably on thin/recent tickers),
+    # which would make I3 = (price-open)/(high-open) exceed 1.0 and corrupt ATH.
+    # The day's high can never be below the last print, nor the low above it, so
+    # clamp the candle to stay valid: low <= price <= high.
     return StockSnapshot(
         symbol=symbol,
         rt_price=price,
         open_price=float(quote.get("o") or 0.0),
         prev_close=float(quote.get("pc") or 0.0),
-        today_high=float(quote.get("h") or 0.0),
-        today_low=float(quote.get("l") or 0.0),
+        today_high=max(raw_high, price),
+        today_low=min(raw_low, price) if raw_low > 0 else price,
         today_value=price * volume,
     )
 

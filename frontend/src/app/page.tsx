@@ -108,12 +108,12 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={() => setDebug((d) => !d)}
-            className={`hidden sm:block px-3 py-2 rounded text-sm font-medium border transition-colors ${
+            className={`px-3 py-2 rounded text-sm font-medium border transition-colors ${
               debug
                 ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
-                : "border-transparent text-transparent"
+                : ""
             }`}
-            style={debug ? {} : { color: "var(--border)", borderColor: "var(--border)" }}
+            style={debug ? {} : { color: "var(--muted)", borderColor: "var(--border)" }}
           >
             {debug ? "Debug ON" : "Debug"}
           </button>
