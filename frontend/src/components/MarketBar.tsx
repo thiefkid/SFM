@@ -18,10 +18,11 @@ function Pct({ value, label }: { value: number; label: string }) {
 interface Props {
   nasdaq: NasdaqResult;
   refreshedAt: string | null;
+  refreshing?: boolean;
   debug?: boolean;
 }
 
-export default function MarketBar({ nasdaq, refreshedAt, debug = false }: Props) {
+export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, debug = false }: Props) {
   const time = refreshedAt
     ? new Date(refreshedAt).toLocaleTimeString("en-US", {
         timeZone: "America/New_York",
@@ -67,6 +68,22 @@ export default function MarketBar({ nasdaq, refreshedAt, debug = false }: Props)
       )}
 
       <div className="flex-1" />
+
+      {refreshing && (
+        <span className="flex items-center gap-2 text-sm" style={{ color: "var(--green)" }}>
+          <span className="relative flex h-2.5 w-2.5">
+            <span
+              className="absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping"
+              style={{ background: "var(--green)" }}
+            />
+            <span
+              className="relative inline-flex h-2.5 w-2.5 rounded-full"
+              style={{ background: "var(--green)" }}
+            />
+          </span>
+          Updating…
+        </span>
+      )}
 
       {time && (
         <span className="text-sm" style={{ color: "var(--muted)" }}>

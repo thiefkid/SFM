@@ -4,13 +4,18 @@
 """
 
 import asyncio
+import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.database import async_session
+from app.models.last_refresh import LastRefresh
 from app.services import indicators as ind_engine
 from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
 from app.services import quotes as quote_service
@@ -19,9 +24,12 @@ from app.services.historical import (
     ensure_fresh, get_ath_status, get_past_values, get_year_high, _now_et,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
-# In-memory cache of the last successful refresh result
+# In-memory cache of the last successful refresh result (fast path; DB is the
+# durable source of truth that survives Cloud Run cold starts / redeploys).
 _last_result: dict[str, Any] | None = None
 
 
@@ -152,6 +160,41 @@ def _mock_history(symbol: str) -> tuple[PastValuesResult, ATHResult, YearHighRes
     return history, ath, year_high
 
 
+async def _persist_last(payload: dict[str, Any]) -> None:
+    """Upsert the single last_refresh row so /last survives cold starts."""
+    if settings.scraper_mock_mode:
+        return
+    try:
+        async with async_session() as session:
+            row = await session.get(LastRefresh, 1)
+            now = datetime.now(tz=timezone.utc)
+            if row is None:
+                session.add(LastRefresh(id=1, payload=json.dumps(payload), refreshed_at=now))
+            else:
+                row.payload = json.dumps(payload)
+                row.refreshed_at = now
+            await session.commit()
+    except Exception as exc:
+        # Persistence is best-effort — never fail a refresh because the DB blinked.
+        logger.warning("Failed to persist last_refresh: %s", exc)
+
+
+async def _load_last() -> dict[str, Any] | None:
+    """Read the persisted last_refresh row (DB), falling back to memory."""
+    if _last_result is not None:
+        return _last_result
+    if settings.scraper_mock_mode:
+        return None
+    try:
+        async with async_session() as session:
+            row = (await session.execute(select(LastRefresh).limit(1))).scalar_one_or_none()
+            if row is not None:
+                return json.loads(row.payload)
+    except Exception as exc:
+        logger.warning("Failed to load last_refresh from DB: %s", exc)
+    return None
+
+
 async def _get_nasdaq() -> NasdaqSnapshot:
     """Real-time NASDAQ level, preferring Futu's live index page.
 
@@ -261,14 +304,16 @@ async def refresh() -> RefreshResponse:
         stocks=stock_results,
     )
 
-    # Cache for /last endpoint
+    # Cache in memory (fast path) and persist to DB (durable across cold starts)
     _last_result = response.model_dump()
+    await _persist_last(_last_result)
     return response
 
 
 @router.get("/last", response_model=RefreshResponse)
 async def get_last() -> RefreshResponse:
-    """Return the most recent cached refresh result (used on page load)."""
-    if _last_result is None:
+    """Return the most recent refresh result — from DB so it survives cold starts."""
+    last = await _load_last()
+    if last is None:
         raise HTTPException(status_code=404, detail="No data yet — click Refresh Data")
-    return RefreshResponse(**_last_result)
+    return RefreshResponse(**last)

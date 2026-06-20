@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import CandidatesTable from "@/components/CandidatesTable";
 import MarketBar from "@/components/MarketBar";
@@ -8,20 +8,55 @@ import RefreshButton from "@/components/RefreshButton";
 import { fetchLast, fetchRefresh } from "@/lib/api";
 import type { DashboardData } from "@/types/dashboard";
 
+// Auto-refresh window: every 2 min from 3:40–4:00 PM ET on weekdays. Gives a
+// "live, streaming" feel into the close without ever blanking the screen.
+const WINDOW_START_MIN = 15 * 60 + 40; // 15:40 ET
+const WINDOW_END_MIN = 16 * 60; // 16:00 ET
+const POLL_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+const TICK_MS = 20 * 1000; // how often we check the clock
+
+/** Minutes-since-midnight and weekday in America/New_York, regardless of viewer TZ. */
+function nowET(): { minutes: number; weekday: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "short",
+    hour12: false,
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const wd = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wd);
+  return { minutes: hour * 60 + minute, weekday };
+}
+
+function inAutoWindow(): boolean {
+  const { minutes, weekday } = nowET();
+  const isWeekday = weekday >= 1 && weekday <= 5;
+  return isWeekday && minutes >= WINDOW_START_MIN && minutes <= WINDOW_END_MIN;
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debug, setDebug] = useState(false);
 
-  useEffect(() => {
-    fetchLast()
-      .then((d) => { if (d) setData(d); })
-      .catch(() => {});
-  }, []);
+  // Refs so the polling interval reads live values without re-subscribing.
+  const refreshingRef = useRef(false);
+  const hasDataRef = useRef(false);
+  const lastStartRef = useRef(0);
+  useEffect(() => { refreshingRef.current = refreshing; }, [refreshing]);
+  useEffect(() => { hasDataRef.current = data !== null; }, [data]);
 
-  const handleRefresh = useCallback(async () => {
-    setLoading(true);
+  // Core refresh. Background refreshes keep the current table on screen and only
+  // swap in new rows when they arrive — no blank flash, just a live indicator.
+  const runRefresh = useCallback(async () => {
+    if (refreshingRef.current) return; // never overlap requests
+    refreshingRef.current = true;
+    lastStartRef.current = Date.now();
+    setRefreshing(true);
     setError(null);
     try {
       const result = await fetchRefresh();
@@ -29,11 +64,47 @@ export default function DashboardPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      refreshingRef.current = false;
+      setRefreshing(false);
     }
   }, []);
 
+  // On open: show the last persisted snapshot immediately (survives cold starts),
+  // then kick a fresh pull in the background if we have nothing yet.
+  useEffect(() => {
+    let cancelled = false;
+    fetchLast()
+      .then((d) => {
+        if (cancelled) return;
+        if (d) {
+          setData(d);
+          hasDataRef.current = true;
+        } else {
+          // Nothing cached anywhere → fetch so she never lands on a blank screen.
+          runRefresh();
+        }
+      })
+      .catch(() => { if (!cancelled) runRefresh(); });
+    return () => { cancelled = true; };
+  }, [runRefresh]);
+
+  // Auto-poll during the closing window. Checks the clock every 20s and fires a
+  // background refresh at most once per 2 min while in-window.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!inAutoWindow()) return;
+      if (refreshingRef.current) return;
+      if (Date.now() - lastStartRef.current < POLL_INTERVAL_MS) return;
+      runRefresh();
+    }, TICK_MS);
+    return () => clearInterval(id);
+  }, [runRefresh]);
+
   const emptyNasdaq = { rt_level: 0, open_level: 0, prev_close: 0, from_open_pct: 0, from_prev_close_pct: 0, error: null };
+
+  // Big "fetching…" banner only on the very first load (no data yet). Once data
+  // is on screen, refreshes are silent + in-place via the live indicator.
+  const showInitialLoading = refreshing && data === null;
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
@@ -62,7 +133,7 @@ export default function DashboardPage() {
           >
             {debug ? "Debug ON" : "Debug"}
           </button>
-          <RefreshButton loading={loading} onClick={handleRefresh} />
+          <RefreshButton loading={refreshing} onClick={runRefresh} />
         </div>
       </header>
 
@@ -70,6 +141,7 @@ export default function DashboardPage() {
       <MarketBar
         nasdaq={data?.nasdaq ?? emptyNasdaq}
         refreshedAt={data?.refreshed_at ?? null}
+        refreshing={refreshing}
         debug={debug}
       />
 
@@ -81,13 +153,13 @@ export default function DashboardPage() {
             style={{ background: "#3a1a1a", border: "1px solid #5c2020", color: "#f0a0a0" }}
           >
             <strong>Error:</strong> {error}
-            {!loading && (
-              <span className="ml-2" style={{ color: "#d08080" }}>Previous data shown below.</span>
+            {data && (
+              <span className="ml-2" style={{ color: "#d08080" }}>Showing last good data below.</span>
             )}
           </div>
         )}
 
-        {loading && (
+        {showInitialLoading && (
           <div
             className="px-4 py-3 rounded text-sm"
             style={{ background: "#1a2010", border: "1px solid #2a3a18", color: "#b0c090" }}
