@@ -7,7 +7,8 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -338,11 +339,37 @@ async def _get_nasdaq() -> NasdaqSnapshot:
     return await quote_service.get_nasdaq_snapshot()
 
 
+def _i4_from_intraday(
+    intraday: dict[date, float],
+    today: date,
+    db_history: PastValuesResult,
+    snapshot: StockSnapshot,
+) -> tuple[PastValuesResult, float]:
+    """Prefer bar-aggregated turnover (true VWAP basis) for I4; fall back to DB.
+
+    Returns (history, today_value). History and today are taken from the *same*
+    basis so the bar chart is apples-to-apples: if there's enough intraday
+    history we use it for both; otherwise we keep the DB close×volume history
+    and the snapshot's close×volume today.
+    """
+    completed = sorted(d for d in intraday if d < today)
+    if len(completed) >= 3:
+        last = completed[-15:]
+        values = [intraday[d] for d in last]
+        avg = sum(values) / len(values) if values else 0.0
+        history = PastValuesResult(values=values, avg=avg, count=len(values), dates=last)
+        today_value = intraday.get(today, snapshot.today_value)
+        return history, today_value
+    # Not enough intraday history → stay on the existing close×volume basis.
+    return db_history, snapshot.today_value
+
+
 async def _process_symbol(
     symbol: str,
     snapshot: StockSnapshot,
     nasdaq: NasdaqSnapshot,
     now_et: datetime,
+    intraday_turnover: dict[date, float] | None = None,
 ) -> ind_engine.StockIndicators:
     """Ensure complete history, then compute all indicators."""
     if settings.scraper_mock_mode:
@@ -356,6 +383,11 @@ async def _process_symbol(
             get_ath_status(symbol, snapshot.today_high, now_et),
             get_year_high(symbol, snapshot.today_high, now_et),
         )
+        # Upgrade I4 to the accurate bar-aggregated turnover when available.
+        history, today_value = _i4_from_intraday(
+            intraday_turnover or {}, now_et.date(), history, snapshot
+        )
+        snapshot = replace(snapshot, today_value=today_value)
     return ind_engine.compute_all(
         snapshot, history, ath, year_high, nasdaq,
         today_date=now_et.date().isoformat(),
@@ -413,11 +445,18 @@ async def _do_refresh() -> RefreshResponse:
     if all(s.error for s in snapshots):
         raise HTTPException(status_code=502, detail=f"All quote fetches failed: {snapshots[0].error}")
 
+    # Step 2b: one batched intraday pull → accurate bar-aggregated turnover for
+    # I4 (true VWAP basis). Empty dict on failure → close×volume fallback.
+    intraday_turnover = await quote_service.get_intraday_turnover(symbols)
+
     # Step 3+4: backfill history + compute indicators for each symbol.
     # One shared "now" so freshness, ATH and 52-week high all agree on the clock.
     now_et = _now_et()
     tasks = [
-        _process_symbol(snap.symbol, snap, nasdaq, now_et)
+        _process_symbol(
+            snap.symbol, snap, nasdaq, now_et,
+            intraday_turnover.get(snap.symbol),
+        )
         for snap in snapshots
     ]
     all_indicators = await asyncio.gather(*tasks)
