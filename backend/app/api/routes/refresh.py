@@ -361,7 +361,13 @@ def _i4_from_polygon(
         avg = sum(values) / len(values) if values else 0.0
         history = PastValuesResult(values=values, avg=avg, count=len(values), dates=last)
         today_value = polygon.get(today, snapshot.today_value)
+        today_source = "polygon" if today in polygon else "snapshot(close×vol)"
+        logger.info("I4 %s: SOURCE=POLYGON (%d days), today=%.0f via %s, sample_last=%.0f",
+                     snapshot.symbol, len(last), today_value, today_source,
+                     values[-1] if values else 0)
         return history, today_value
+    logger.warning("I4 %s: SOURCE=DB_FALLBACK (only %d polygon days, need >=3), today=%.0f",
+                   snapshot.symbol, len(completed), snapshot.today_value)
     return db_history, snapshot.today_value
 
 

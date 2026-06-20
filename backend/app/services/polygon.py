@@ -46,8 +46,13 @@ async def _fetch_daily_aggs(symbol: str, from_date: str, to_date: str) -> list[d
                 continue
             r.raise_for_status()
             data = r.json()
-            return data.get("results") or []
-        except httpx.HTTPStatusError:
+            results = data.get("results") or []
+            logger.info("Polygon API %s: HTTP %d, %d results, status=%s",
+                        symbol, r.status_code, len(results), data.get("status"))
+            return results
+        except httpx.HTTPStatusError as exc:
+            logger.error("Polygon API HTTP error for %s: %d %s",
+                         symbol, exc.response.status_code, exc.response.text[:200])
             raise
         except Exception as exc:
             logger.warning("Polygon fetch failed for %s (attempt %d): %s", symbol, attempt + 1, exc)
@@ -62,6 +67,8 @@ def _ts_to_date(t_ms: int) -> date:
 
 async def _fetch_and_cache(symbol: str, from_date: str, to_date: str) -> dict[date, float]:
     bars = await _fetch_daily_aggs(symbol, from_date, to_date)
+    if not bars:
+        logger.warning("Polygon returned 0 bars for %s (%s → %s)", symbol, from_date, to_date)
     result: dict[date, float] = {}
     for bar in bars:
         v = bar.get("v")
@@ -72,6 +79,8 @@ async def _fetch_and_cache(symbol: str, from_date: str, to_date: str) -> dict[da
             turnover = float(v) * float(vw)
             _cache[(symbol, d)] = turnover
             result[d] = turnover
+    logger.info("Polygon %s: %d bars → %d turnover days (range %s to %s)",
+                symbol, len(bars), len(result), from_date, to_date)
     _cache_populated_symbols.add(symbol)
     return result
 
@@ -85,7 +94,10 @@ async def get_daily_turnover(
     Cached per process — settled bars never change. Only uncached symbols hit
     the API. Returns {symbol: {date: turnover_dollars}} or {} on failure.
     """
-    if not symbols or not settings.polygon_api_key:
+    if not symbols:
+        return {}
+    if not settings.polygon_api_key:
+        logger.warning("POLYGON_API_KEY not set — falling back to DB close×volume turnover")
         return {}
 
     today = date.today()
@@ -96,14 +108,15 @@ async def get_daily_turnover(
     need_fetch = [s for s in symbols if s not in _cache_populated_symbols]
 
     if need_fetch:
-        # Fetch in batches of 5 to respect 5 req/min rate limit.
-        # First batch fires immediately; subsequent batches wait 62s.
+        logger.info("Polygon: fetching %d symbols: %s", len(need_fetch), need_fetch)
         for batch_idx in range(0, len(need_fetch), 5):
             batch = need_fetch[batch_idx : batch_idx + 5]
             if batch_idx > 0:
                 logger.info("Polygon rate limit: waiting 62s before batch %d", batch_idx // 5 + 1)
                 await asyncio.sleep(62)
             await asyncio.gather(*[_fetch_and_cache(s, from_date, to_date) for s in batch])
+    else:
+        logger.info("Polygon: all %d symbols cached, no API calls needed", len(symbols))
 
     # Build result from cache
     out: dict[str, dict[date, float]] = {}
@@ -115,4 +128,7 @@ async def get_daily_turnover(
             if key in _cache:
                 turnover_by_date[d] = _cache[key]
         out[s] = turnover_by_date
+        logger.info("Polygon turnover for %s: %d days cached, sample: %s",
+                     s, len(turnover_by_date),
+                     {d.isoformat(): f"${v:,.0f}" for d, v in sorted(turnover_by_date.items())[-3:]})
     return out
