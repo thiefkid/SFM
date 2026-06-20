@@ -94,21 +94,21 @@ export default function DashboardPage() {
     <div className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
       {/* Header */}
       <header
-        className="flex items-center justify-between px-6 py-5 border-b"
+        className="flex items-center justify-between gap-3 px-4 sm:px-6 pt-safe pb-4 sm:pb-5 border-b"
         style={{ background: "var(--surface)", borderColor: "var(--border)" }}
       >
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-wide" style={{ color: "var(--text-bright)" }}>
             SFM
           </h1>
-          <p className="text-sm mt-0.5" style={{ color: "var(--muted)" }}>
-            Top 10 most active · 3:59 PM EST
+          <p className="text-sm mt-0.5 italic" style={{ color: "var(--muted)" }}>
+            Patience compounds; conviction endures.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={() => setDebug((d) => !d)}
-            className={`px-3 py-2 rounded text-sm font-medium border transition-colors ${
+            className={`hidden sm:block px-3 py-2 rounded text-sm font-medium border transition-colors ${
               debug
                 ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
                 : "border-transparent text-transparent"
@@ -130,7 +130,7 @@ export default function DashboardPage() {
       />
 
       {/* Main content */}
-      <main className="flex-1 p-5 space-y-4">
+      <main className="flex-1 p-4 sm:p-5 pb-safe space-y-4">
         {error && (
           <div
             className="px-4 py-3 rounded text-sm"

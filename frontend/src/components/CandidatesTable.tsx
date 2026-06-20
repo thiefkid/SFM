@@ -211,6 +211,113 @@ function DebugFormula({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Mobile card (shown < md, where a 8-column table would force horizontal scroll)
+// ---------------------------------------------------------------------------
+
+function CardStat({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <span className="uppercase tracking-wider" style={{ color: "var(--muted)", fontSize: 11 }}>
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function StockCard({ stock, debug }: { stock: StockResult; debug: boolean }) {
+  return (
+    <div
+      className="rounded-lg p-4 space-y-4"
+      style={{ border: "1px solid var(--border)", background: "var(--surface)" }}
+    >
+      {/* Symbol + price */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-baseline gap-2.5 min-w-0">
+          <span className="tabular-nums shrink-0" style={{ color: "var(--muted)", fontSize: 14 }}>
+            #{stock.rank}
+          </span>
+          <span className="font-bold tracking-wide truncate" style={{ color: "var(--text-bright)", fontSize: 22 }}>
+            {stock.symbol}
+          </span>
+          {stock.scrape_error && (
+            <span className="shrink-0" style={{ color: "var(--gold)", fontSize: 12 }} title={stock.scrape_error}>
+              partial
+            </span>
+          )}
+        </div>
+        <span className="tabular-nums font-semibold shrink-0" style={{ color: "var(--text-bright)", fontSize: 22 }}>
+          {fmtPrice(stock.rt_price)}
+        </span>
+      </div>
+
+      {/* I1 / I2 / I3 */}
+      <div className="grid grid-cols-3 gap-3">
+        <CardStat label="I1 · Open">
+          <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i1), fontSize: 15 }}>
+            {fmtPct(stock.i1)}
+          </span>
+        </CardStat>
+        <CardStat label="I2 · Chg">
+          <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i2), fontSize: 15 }}>
+            {fmtPct(stock.i2)}
+          </span>
+        </CardStat>
+        <CardStat label="I3 · Range">
+          <I3Cell value={stock.i3} />
+        </CardStat>
+      </div>
+
+      {debug && (
+        <DebugFormula>
+          {stock.open_price > 0 && (
+            <div>I1=({stock.rt_price.toFixed(2)}−{stock.open_price.toFixed(2)})/{stock.open_price.toFixed(2)}</div>
+          )}
+          {stock.prev_close > 0 && (
+            <div>I2=({stock.rt_price.toFixed(2)}−{stock.prev_close.toFixed(2)})/{stock.prev_close.toFixed(2)}</div>
+          )}
+          {stock.open_price > 0 && stock.today_high > stock.open_price && (
+            <div>I3=({stock.rt_price.toFixed(2)}−{stock.open_price.toFixed(2)})/({stock.today_high.toFixed(2)}−{stock.open_price.toFixed(2)})</div>
+          )}
+        </DebugFormula>
+      )}
+
+      {/* I4 */}
+      <CardStat label="I4 · Volume (15d)">
+        <I4Cell {...stock.i4} />
+      </CardStat>
+
+      {/* I5 */}
+      <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+        <I5Cell {...stock.i5} />
+      </div>
+    </div>
+  );
+}
+
+function I6Footer({ stock }: { stock: StockResult }) {
+  return (
+    <div
+      className="rounded-lg px-4 py-3 flex flex-wrap gap-x-6 gap-y-1"
+      style={{ border: "1px solid var(--border)", background: "var(--surface)", fontSize: 14 }}
+    >
+      <span style={{ color: "var(--muted)" }}>
+        I6 — NASDAQ from open:{" "}
+        <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i6.nasdaq_from_open_pct) }}>
+          {fmtPct(stock.i6.nasdaq_from_open_pct)}
+        </span>
+      </span>
+      <span style={{ color: "var(--muted)" }}>
+        from prev close:{" "}
+        <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i6.nasdaq_from_prev_close_pct) }}>
+          {fmtPct(stock.i6.nasdaq_from_prev_close_pct)}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 interface Props {
   stocks: StockResult[];
   debug?: boolean;
@@ -229,122 +336,114 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg" style={{ border: "1px solid var(--border)" }}>
-      <table className="w-full border-collapse text-left">
-        <thead style={{ background: "var(--surface)" }}>
-          <tr>
-            <TH>#</TH>
-            <TH>Symbol</TH>
-            <TH>Price</TH>
-            <TH style={{ minWidth: 120 }}>I1 — Open</TH>
-            <TH style={{ minWidth: 130 }}>I2 — Change</TH>
-            <TH style={{ minWidth: 140 }}>I3 — Range</TH>
-            <TH style={{ minWidth: 220 }}>I4 — Volume (15d)</TH>
-            <TH style={{ minWidth: 190 }}>I5 — ATH / 52W</TH>
-          </tr>
-        </thead>
-        <tbody>
-          {stocks.map((stock) => (
-            <tr
-              key={stock.symbol}
-              className="transition-colors"
-              style={{ background: "transparent" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-              <TD>
-                <span className="tabular-nums" style={{ color: "var(--muted)", fontSize: 14 }}>
-                  {stock.rank}
-                </span>
-              </TD>
+    <div className="space-y-4">
+      {/* Mobile: stacked cards (no horizontal scroll) */}
+      <div className="md:hidden space-y-3">
+        {stocks.map((stock) => (
+          <StockCard key={stock.symbol} stock={stock} debug={debug} />
+        ))}
+      </div>
 
-              <TD>
-                <div className="flex flex-col">
-                  <span className="font-bold tracking-wide" style={{ color: "var(--text-bright)", fontSize: 16 }}>
-                    {stock.symbol}
-                  </span>
-                  {stock.scrape_error && (
-                    <span style={{ color: "var(--gold)", fontSize: 13 }} title={stock.scrape_error}>
-                      partial
-                    </span>
-                  )}
-                </div>
-              </TD>
-
-              <TD>
-                <span className="tabular-nums font-semibold" style={{ color: "var(--text-bright)", fontSize: 16 }}>
-                  {fmtPrice(stock.rt_price)}
-                </span>
-              </TD>
-
-              {/* I1 */}
-              <TD>
-                <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i1), fontSize: 15 }}>
-                  {fmtPct(stock.i1)}
-                </span>
-                {debug && stock.open_price > 0 && (
-                  <DebugFormula>
-                    ({stock.rt_price.toFixed(2)} - {stock.open_price.toFixed(2)}) / {stock.open_price.toFixed(2)}
-                  </DebugFormula>
-                )}
-              </TD>
-
-              {/* I2 */}
-              <TD>
-                <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i2), fontSize: 15 }}>
-                  {fmtPct(stock.i2)}
-                </span>
-                {debug && stock.prev_close > 0 && (
-                  <DebugFormula>
-                    ({stock.rt_price.toFixed(2)} - {stock.prev_close.toFixed(2)}) / {stock.prev_close.toFixed(2)}
-                  </DebugFormula>
-                )}
-              </TD>
-
-              {/* I3 */}
-              <TD>
-                <I3Cell value={stock.i3} />
-                {debug && stock.open_price > 0 && stock.today_high > stock.open_price && (
-                  <DebugFormula>
-                    ({stock.rt_price.toFixed(2)} - {stock.open_price.toFixed(2)}) / ({stock.today_high.toFixed(2)} - {stock.open_price.toFixed(2)})
-                  </DebugFormula>
-                )}
-              </TD>
-
-              {/* I4 */}
-              <TD>
-                <I4Cell {...stock.i4} />
-              </TD>
-
-              {/* I5 */}
-              <TD>
-                <I5Cell {...stock.i5} />
-              </TD>
+      {/* Desktop / tablet: full table */}
+      <div className="hidden md:block overflow-x-auto rounded-lg" style={{ border: "1px solid var(--border)" }}>
+        <table className="w-full border-collapse text-left">
+          <thead style={{ background: "var(--surface)" }}>
+            <tr>
+              <TH>#</TH>
+              <TH>Symbol</TH>
+              <TH>Price</TH>
+              <TH style={{ minWidth: 120 }}>I1 — Open</TH>
+              <TH style={{ minWidth: 130 }}>I2 — Change</TH>
+              <TH style={{ minWidth: 140 }}>I3 — Range</TH>
+              <TH style={{ minWidth: 220 }}>I4 — Volume (15d)</TH>
+              <TH style={{ minWidth: 190 }}>I5 — ATH / 52W</TH>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {stocks.map((stock) => (
+              <tr
+                key={stock.symbol}
+                className="transition-colors"
+                style={{ background: "transparent" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <TD>
+                  <span className="tabular-nums" style={{ color: "var(--muted)", fontSize: 14 }}>
+                    {stock.rank}
+                  </span>
+                </TD>
 
-      {/* I6 footer */}
-      {stocks.length > 0 && (
-        <div
-          className="px-4 py-3 flex flex-wrap gap-x-6 gap-y-1"
-          style={{ borderTop: "1px solid var(--border)", background: "var(--surface)", fontSize: 14 }}
-        >
-          <span style={{ color: "var(--muted)" }}>
-            I6 — NASDAQ from open:{" "}
-            <span className="tabular-nums font-semibold" style={{ color: pctColor(stocks[0].i6.nasdaq_from_open_pct) }}>
-              {fmtPct(stocks[0].i6.nasdaq_from_open_pct)}
-            </span>
-          </span>
-          <span style={{ color: "var(--muted)" }}>
-            from prev close:{" "}
-            <span className="tabular-nums font-semibold" style={{ color: pctColor(stocks[0].i6.nasdaq_from_prev_close_pct) }}>
-              {fmtPct(stocks[0].i6.nasdaq_from_prev_close_pct)}
-            </span>
-          </span>
-        </div>
-      )}
+                <TD>
+                  <div className="flex flex-col">
+                    <span className="font-bold tracking-wide" style={{ color: "var(--text-bright)", fontSize: 16 }}>
+                      {stock.symbol}
+                    </span>
+                    {stock.scrape_error && (
+                      <span style={{ color: "var(--gold)", fontSize: 13 }} title={stock.scrape_error}>
+                        partial
+                      </span>
+                    )}
+                  </div>
+                </TD>
+
+                <TD>
+                  <span className="tabular-nums font-semibold" style={{ color: "var(--text-bright)", fontSize: 16 }}>
+                    {fmtPrice(stock.rt_price)}
+                  </span>
+                </TD>
+
+                {/* I1 */}
+                <TD>
+                  <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i1), fontSize: 15 }}>
+                    {fmtPct(stock.i1)}
+                  </span>
+                  {debug && stock.open_price > 0 && (
+                    <DebugFormula>
+                      ({stock.rt_price.toFixed(2)} - {stock.open_price.toFixed(2)}) / {stock.open_price.toFixed(2)}
+                    </DebugFormula>
+                  )}
+                </TD>
+
+                {/* I2 */}
+                <TD>
+                  <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i2), fontSize: 15 }}>
+                    {fmtPct(stock.i2)}
+                  </span>
+                  {debug && stock.prev_close > 0 && (
+                    <DebugFormula>
+                      ({stock.rt_price.toFixed(2)} - {stock.prev_close.toFixed(2)}) / {stock.prev_close.toFixed(2)}
+                    </DebugFormula>
+                  )}
+                </TD>
+
+                {/* I3 */}
+                <TD>
+                  <I3Cell value={stock.i3} />
+                  {debug && stock.open_price > 0 && stock.today_high > stock.open_price && (
+                    <DebugFormula>
+                      ({stock.rt_price.toFixed(2)} - {stock.open_price.toFixed(2)}) / ({stock.today_high.toFixed(2)} - {stock.open_price.toFixed(2)})
+                    </DebugFormula>
+                  )}
+                </TD>
+
+                {/* I4 */}
+                <TD>
+                  <I4Cell {...stock.i4} />
+                </TD>
+
+                {/* I5 */}
+                <TD>
+                  <I5Cell {...stock.i5} />
+                </TD>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* I6 footer — shared by both views */}
+      <I6Footer stock={stocks[0]} />
     </div>
   );
 }

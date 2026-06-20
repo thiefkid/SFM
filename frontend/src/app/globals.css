@@ -30,3 +30,12 @@ body {
 .tabular-nums {
   font-family: "SF Mono", "Menlo", ui-monospace, monospace;
 }
+
+/* iPhone safe areas (notch / Dynamic Island / home indicator) — viewportFit
+   is "cover", so content would otherwise slide under the status bar. */
+.pt-safe { padding-top: max(env(safe-area-inset-top), 1rem); }
+.pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 1rem); }
+.px-safe {
+  padding-left: max(env(safe-area-inset-left), 1rem);
+  padding-right: max(env(safe-area-inset-right), 1rem);
+}

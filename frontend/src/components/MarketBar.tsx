@@ -34,7 +34,7 @@ export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, deb
 
   return (
     <div
-      className="flex flex-wrap items-center gap-5 px-6 py-3 border-b"
+      className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 sm:px-6 py-3 border-b"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
       <div className="flex items-center gap-2">
