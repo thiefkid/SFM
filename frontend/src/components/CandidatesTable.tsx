@@ -432,16 +432,12 @@ function EventsRow({
 }) {
   return (
     <div
-      className="mt-2 pt-2 space-y-1"
+      className="mt-2 pt-2 flex items-baseline gap-x-4 gap-y-1 flex-wrap"
       style={{ borderTop: "1px solid var(--border)" }}
     >
       <EventLabel tag="Earnings" iso={earningsDate} />
-      {(dividendDate || exDividendDate) && (
-        <div className="flex items-baseline gap-4 flex-wrap">
-          {dividendDate && <EventLabel tag="Dividend" iso={dividendDate} />}
-          {exDividendDate && <EventLabel tag="Ex-Div" iso={exDividendDate} />}
-        </div>
-      )}
+      {dividendDate && <EventLabel tag="Dividend" iso={dividendDate} />}
+      {exDividendDate && <EventLabel tag="Ex-Div" iso={exDividendDate} />}
     </div>
   );
 }
