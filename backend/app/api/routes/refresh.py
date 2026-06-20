@@ -2,6 +2,7 @@
 /api/v1/refresh  — orchestrates full scrape + indicator pipeline
 /api/v1/last     — returns last successful result (shown on page load)
 /api/v1/events   — SSE stream for live refresh status (start / done)
+/api/v1/news/{symbol} — on-demand company news for a ticker
 """
 
 import asyncio
@@ -673,3 +674,11 @@ async def events(request: Request):
                 pass
 
     return EventSourceResponse(stream())
+
+
+@router.get("/news/{symbol}")
+async def get_news(symbol: str):
+    """On-demand company news for a ticker (Finnhub /company-news)."""
+    from app.services import news as news_service
+    items = await news_service.get_company_news(symbol.upper(), count=5)
+    return {"symbol": symbol.upper(), "articles": items}

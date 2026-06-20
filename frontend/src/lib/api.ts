@@ -22,3 +22,20 @@ export async function fetchLast(): Promise<DashboardData | null> {
   if (!res.ok) throw new Error(`Failed to load last data (${res.status})`);
   return res.json();
 }
+
+export interface NewsArticle {
+  headline: string;
+  summary: string;
+  source: string;
+  url: string;
+  image: string;
+  datetime: number;
+  category: string;
+}
+
+export async function fetchNews(symbol: string): Promise<NewsArticle[]> {
+  const res = await fetch(`${API}/api/v1/news/${encodeURIComponent(symbol)}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.articles ?? [];
+}

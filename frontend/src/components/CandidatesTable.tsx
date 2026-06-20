@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { StockResult } from "@/types/dashboard";
+import { fetchNews, type NewsArticle } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -442,14 +443,115 @@ function EventsRow({
   );
 }
 
-function NewsSection() {
+function NewsModal({
+  article,
+  onClose,
+}: {
+  article: NewsArticle;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const ts = article.datetime
+    ? new Date(article.datetime * 1000).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.7)" }}
+      onClick={onClose}
+    >
+      <div
+        className="rounded-lg w-full max-w-lg max-h-[80vh] overflow-y-auto p-5 relative"
+        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full"
+          style={{ background: "var(--bg)", color: "var(--muted)" }}
+          onClick={onClose}
+        >
+          ✕
+        </button>
+
+        <h2
+          className="text-base font-semibold pr-8 leading-snug"
+          style={{ color: "var(--text-bright)" }}
+        >
+          {article.headline}
+        </h2>
+
+        <div className="flex items-center gap-2 mt-2 text-xs" style={{ color: "var(--muted)" }}>
+          {article.source && <span>{article.source}</span>}
+          {article.source && ts && <span>·</span>}
+          {ts && <span>{ts}</span>}
+        </div>
+
+        {article.summary && (
+          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+            {article.summary}
+          </p>
+        )}
+
+        {article.url && (
+          <a
+            href={article.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block mt-4 text-sm font-medium underline"
+            style={{ color: "var(--accent, #60a5fa)" }}
+          >
+            Read full article →
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NewsSection({ symbol }: { symbol: string }) {
   const [open, setOpen] = useState(false);
+  const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
+  const [selected, setSelected] = useState<NewsArticle | null>(null);
+
+  const handleToggle = useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev;
+      if (next && !fetched) {
+        setLoading(true);
+        fetchNews(symbol)
+          .then((items) => {
+            setArticles(items);
+            setFetched(true);
+          })
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      }
+      return next;
+    });
+  }, [symbol, fetched]);
+
   return (
     <div style={{ borderTop: "1px solid var(--border)" }}>
       <button
         className="flex items-center gap-2 w-full pt-3 pb-1 text-sm select-none"
         style={{ color: "var(--muted)" }}
-        onClick={() => setOpen((o) => !o)}
+        onClick={handleToggle}
       >
         <svg
           className="h-3.5 w-3.5 transition-transform"
@@ -464,13 +566,43 @@ function NewsSection() {
         <span className="uppercase tracking-wider font-medium" style={{ fontSize: 12 }}>News</span>
       </button>
       {open && (
-        <div
-          className="py-2 text-sm italic"
-          style={{ color: "var(--muted)" }}
-        >
-          No news yet.
+        <div className="pb-2">
+          {loading && (
+            <p className="text-sm italic py-1" style={{ color: "var(--muted)" }}>
+              Loading…
+            </p>
+          )}
+          {!loading && articles.length === 0 && (
+            <p className="text-sm italic py-1" style={{ color: "var(--muted)" }}>
+              No recent news.
+            </p>
+          )}
+          {articles.map((a, i) => {
+            const ts = a.datetime
+              ? new Date(a.datetime * 1000).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                })
+              : null;
+            return (
+              <button
+                key={i}
+                className="block w-full text-left py-1.5 text-sm leading-snug hover:underline"
+                style={{ color: "var(--text)" }}
+                onClick={() => setSelected(a)}
+              >
+                {a.headline}
+                {ts && (
+                  <span className="ml-2" style={{ color: "var(--muted)", fontSize: 11 }}>
+                    {ts}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
+      {selected && <NewsModal article={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
@@ -612,8 +744,8 @@ function StockCard({ stock }: { stock: StockResult }) {
         />
       </div>
 
-      {/* News — collapsible, placeholder */}
-      <NewsSection />
+      {/* News — on-demand fetch */}
+      <NewsSection symbol={stock.symbol} />
     </div>
   );
 }
@@ -784,7 +916,7 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
                   <I4Cell {...stock.i4} />
                 </TD>
 
-                {/* I5 + earnings countdown */}
+                {/* I5 + earnings countdown + news */}
                 <TD>
                   <I5Cell {...stock.i5} />
                   <EventsRow
@@ -792,6 +924,7 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
                     dividendDate={stock.next_dividend_date}
                     exDividendDate={stock.ex_dividend_date}
                   />
+                  <NewsSection symbol={stock.symbol} />
                 </TD>
               </tr>
             ))}
