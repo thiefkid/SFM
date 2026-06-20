@@ -38,6 +38,8 @@ export interface StockResult {
   i5: I5;
   i6: I6;
   next_earnings_date: string | null;   // ISO date of next results announcement
+  next_dividend_date: string | null;   // ISO date of next dividend payment
+  ex_dividend_date: string | null;     // ISO ex-dividend date
 }
 
 export interface NasdaqResult {

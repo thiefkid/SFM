@@ -1,18 +1,16 @@
 """
-Next earnings (results announcement) date per symbol.
+Upcoming corporate events per symbol: earnings date + dividend/ex-dividend dates.
 
-Primary source : Finnhub /calendar/earnings  (confirmed/estimated upcoming).
-Fallback       : yfinance Ticker.calendar     (Yahoo consensus).
+Primary source : Finnhub /calendar/earnings  (earnings only).
+Fallback/suppl.: yfinance Ticker.calendar     (earnings + dividends).
 
-Two free, independent sources — if Finnhub returns nothing (rate limit, tier
-restriction, or no upcoming row) we fall back to Yahoo, so a single source
-being wrong or empty can't blank the countdown.
-
-Earnings dates are stable intraday, so each symbol is fetched at most once per
-UTC day per process and cached.
+yfinance provides both earnings and dividend dates in a single calendar call,
+so we always call it (as fallback for earnings if Finnhub misses, and as the
+sole source for dividend dates). Both are stable intraday, cached per UTC day.
 """
 
 import asyncio
+import dataclasses
 import hashlib
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -27,8 +25,16 @@ logger = logging.getLogger(__name__)
 _FINNHUB_EARNINGS = "https://finnhub.io/api/v1/calendar/earnings"
 _http_client = httpx.AsyncClient(timeout=10.0)
 
-# symbol -> (fetched_on_utc_date, next_earnings_date | None)
-_cache: dict[str, tuple[date, date | None]] = {}
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class UpcomingEvents:
+    next_earnings: date | None = None
+    next_dividend: date | None = None
+    ex_dividend: date | None = None
+
+
+# symbol -> (fetched_on_utc_date, UpcomingEvents)
+_cache: dict[str, tuple[date, UpcomingEvents]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -55,26 +61,48 @@ def _parse_finnhub(payload: dict, today: date) -> date | None:
     return _earliest_future(parsed, today)
 
 
-def _parse_yf_calendar(cal, today: date) -> date | None:
-    """Earliest upcoming date from a yfinance Ticker.calendar dict.
-
-    `calendar` is a dict whose "Earnings Date" is a list of date/datetime
-    (1 entry when confirmed, 2 when Yahoo only has an estimated range).
-    """
+def _parse_yf_calendar(cal, today: date) -> UpcomingEvents:
+    """Extract earnings + dividend dates from a yfinance Ticker.calendar dict."""
     if not isinstance(cal, dict):
+        return UpcomingEvents()
+
+    # Earnings
+    earnings_raw = cal.get("Earnings Date")
+    earnings: date | None = None
+    if earnings_raw:
+        if not isinstance(earnings_raw, (list, tuple)):
+            earnings_raw = [earnings_raw]
+        parsed: list[date] = []
+        for d in earnings_raw:
+            if isinstance(d, datetime):
+                parsed.append(d.date())
+            elif isinstance(d, date):
+                parsed.append(d)
+        earnings = _earliest_future(parsed, today)
+
+    # Dividend Date (payment date)
+    dividend = _parse_single_date(cal.get("Dividend Date"), today)
+    # Ex-Dividend Date
+    ex_div = _parse_single_date(cal.get("Ex-Dividend Date"), today)
+
+    return UpcomingEvents(
+        next_earnings=earnings,
+        next_dividend=dividend,
+        ex_dividend=ex_div,
+    )
+
+
+def _parse_single_date(raw, today: date) -> date | None:
+    """Parse a single date/datetime value, returning it only if it's upcoming."""
+    if raw is None:
         return None
-    raw = cal.get("Earnings Date")
-    if not raw:
+    if isinstance(raw, datetime):
+        d = raw.date()
+    elif isinstance(raw, date):
+        d = raw
+    else:
         return None
-    if not isinstance(raw, (list, tuple)):
-        raw = [raw]
-    parsed: list[date] = []
-    for d in raw:
-        if isinstance(d, datetime):
-            parsed.append(d.date())
-        elif isinstance(d, date):
-            parsed.append(d)
-    return _earliest_future(parsed, today)
+    return d if d >= today else None
 
 
 # ---------------------------------------------------------------------------
@@ -104,60 +132,81 @@ async def _finnhub_next_earnings(symbol: str, today: date) -> date | None:
         return None
 
 
-def _yf_next_earnings(symbol: str, today: date) -> date | None:
+def _yf_calendar(symbol: str, today: date) -> UpcomingEvents:
     try:
         cal = yf.Ticker(symbol).calendar
         logger.info("yfinance calendar %s: keys=%s", symbol, list(cal.keys()) if isinstance(cal, dict) else type(cal).__name__)
     except Exception as exc:
-        logger.warning("yfinance earnings failed for %s: %s", symbol, exc)
-        return None
+        logger.warning("yfinance calendar failed for %s: %s", symbol, exc)
+        return UpcomingEvents()
     return _parse_yf_calendar(cal, today)
 
 
 _YF_TIMEOUT = 15  # seconds
 
 
-async def _resolve_one(symbol: str, today: date) -> tuple[str, date | None]:
-    d: date | None = None
-    source = "none"
+async def _resolve_one(symbol: str, today: date) -> tuple[str, UpcomingEvents]:
+    earnings: date | None = None
+    yf_events = UpcomingEvents()
+    earnings_source = "none"
     try:
+        # Finnhub: earnings only
         if settings.finnhub_api_key:
-            d = await _finnhub_next_earnings(symbol, today)
-            if d is not None:
-                source = "finnhub"
-        if d is None:
-            try:
-                d = await asyncio.wait_for(
-                    asyncio.to_thread(_yf_next_earnings, symbol, today),
-                    timeout=_YF_TIMEOUT,
-                )
-                if d is not None:
-                    source = "yfinance"
-            except asyncio.TimeoutError:
-                logger.warning("yfinance earnings timed out for %s after %ds", symbol, _YF_TIMEOUT)
+            earnings = await _finnhub_next_earnings(symbol, today)
+            if earnings is not None:
+                earnings_source = "finnhub"
+
+        # yfinance: earnings fallback + dividend dates (always fetched for dividends)
+        try:
+            yf_events = await asyncio.wait_for(
+                asyncio.to_thread(_yf_calendar, symbol, today),
+                timeout=_YF_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("yfinance calendar timed out for %s after %ds", symbol, _YF_TIMEOUT)
+
+        if earnings is None and yf_events.next_earnings is not None:
+            earnings = yf_events.next_earnings
+            earnings_source = "yfinance"
     except Exception as exc:
-        logger.warning("Earnings resolution failed for %s: %s", symbol, exc)
-    _cache[symbol] = (today, d)
-    logger.info("Earnings %s: next=%s source=%s", symbol, d, source)
-    return symbol, d
+        logger.warning("Event resolution failed for %s: %s", symbol, exc)
+
+    result = UpcomingEvents(
+        next_earnings=earnings,
+        next_dividend=yf_events.next_dividend,
+        ex_dividend=yf_events.ex_dividend,
+    )
+    _cache[symbol] = (today, result)
+    logger.info("Events %s: earnings=%s(src=%s) div=%s ex_div=%s",
+                symbol, earnings, earnings_source,
+                yf_events.next_dividend, yf_events.ex_dividend)
+    return symbol, result
 
 
-async def get_next_earnings(symbols: list[str]) -> dict[str, date | None]:
-    """Return {symbol: next_earnings_date|None}, cached once per UTC day."""
+async def get_upcoming_events(symbols: list[str]) -> dict[str, UpcomingEvents]:
+    """Return {symbol: UpcomingEvents}, cached once per UTC day."""
     if not symbols:
         return {}
 
     if settings.scraper_mock_mode:
         base = date.today()
         return {
-            s: base + timedelta(
-                days=(int(hashlib.md5(s.encode()).hexdigest(), 16) % 60) + 1
+            s: UpcomingEvents(
+                next_earnings=base + timedelta(
+                    days=(int(hashlib.md5(s.encode()).hexdigest(), 16) % 60) + 1
+                ),
+                next_dividend=base + timedelta(
+                    days=(int(hashlib.md5(b"div" + s.encode()).hexdigest(), 16) % 45) + 1
+                ),
+                ex_dividend=base + timedelta(
+                    days=(int(hashlib.md5(b"exd" + s.encode()).hexdigest(), 16) % 40) + 1
+                ),
             )
             for s in symbols
         }
 
     today = datetime.now(tz=timezone.utc).date()
-    result: dict[str, date | None] = {}
+    result: dict[str, UpcomingEvents] = {}
     to_fetch: list[str] = []
     for s in symbols:
         cached = _cache.get(s)
@@ -167,17 +216,21 @@ async def get_next_earnings(symbols: list[str]) -> dict[str, date | None]:
             to_fetch.append(s)
 
     if to_fetch:
-        # Stagger Finnhub calls slightly to avoid hitting the 60/min rate limit
-        # alongside quote requests that just ran.
         resolved = await asyncio.gather(
             *[_resolve_one(s, today) for s in to_fetch],
             return_exceptions=True,
         )
         for item in resolved:
             if isinstance(item, Exception):
-                logger.warning("Earnings resolution failed: %s", item)
+                logger.warning("Event resolution failed: %s", item)
                 continue
-            s, d = item
-            result[s] = d
+            s, events = item
+            result[s] = events
 
     return result
+
+
+# Backwards-compatible wrapper
+async def get_next_earnings(symbols: list[str]) -> dict[str, date | None]:
+    events = await get_upcoming_events(symbols)
+    return {s: ev.next_earnings for s, ev in events.items()}

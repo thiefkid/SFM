@@ -93,6 +93,8 @@ class StockResult(BaseModel):
     i5: I5Model
     i6: I6Model
     next_earnings_date: str | None = None   # ISO date of next results announcement
+    next_dividend_date: str | None = None   # ISO date of next dividend payment
+    ex_dividend_date: str | None = None     # ISO ex-dividend date
 
 
 class NasdaqResult(BaseModel):
@@ -133,6 +135,8 @@ def _build_stock_result(
     rank: int,
     indicators: ind_engine.StockIndicators,
     next_earnings: date | None = None,
+    next_dividend: date | None = None,
+    ex_dividend: date | None = None,
 ) -> StockResult:
     i4 = indicators.i4
     i5 = indicators.i5
@@ -171,6 +175,8 @@ def _build_stock_result(
             nasdaq_from_prev_close_pct=i6.nasdaq_from_prev_close_pct,
         ),
         next_earnings_date=_fmt_date(next_earnings),
+        next_dividend_date=_fmt_date(next_dividend),
+        ex_dividend_date=_fmt_date(ex_dividend),
     )
 
 
@@ -468,11 +474,11 @@ async def _do_refresh() -> RefreshResponse:
         raise HTTPException(status_code=502, detail=f"All quote fetches failed: {snapshots[0].error}")
 
     # Step 2b: authoritative daily turnover from Polygon (v × vw from tape) and
-    # next earnings dates (Finnhub → yfinance) fetched concurrently. Both degrade
-    # gracefully: empty turnover → DB close×volume fallback; missing earnings → null.
-    polygon_turnover, earnings_dates = await asyncio.gather(
+    # upcoming events (earnings + dividends) fetched concurrently. Both degrade
+    # gracefully: empty turnover → DB close×volume fallback; missing events → null.
+    polygon_turnover, upcoming_events = await asyncio.gather(
         polygon_service.get_daily_turnover(symbols),
-        earnings_service.get_next_earnings(symbols),
+        earnings_service.get_upcoming_events(symbols),
     )
 
     # One shared "now" so freshness, ATH, 52-week high and session all agree.
@@ -526,11 +532,15 @@ async def _do_refresh() -> RefreshResponse:
         error=nasdaq.error,
     )
 
+    from app.services.earnings import UpcomingEvents as _UE
+    _empty = _UE()
     stock_results = [
         _build_stock_result(
             rank=i + 1,
             indicators=ind,
-            next_earnings=earnings_dates.get(ind.symbol),
+            next_earnings=(ev := upcoming_events.get(ind.symbol, _empty)).next_earnings,
+            next_dividend=ev.next_dividend,
+            ex_dividend=ev.ex_dividend,
         )
         for i, ind in enumerate(all_indicators)
     ]

@@ -372,11 +372,9 @@ function I5Cell({
   );
 }
 
-// Days until the next earnings date, plus a label/color. Parses the ISO date
-// as date-only (no TZ shift) and compares against the local calendar day.
-function earningsInfo(
+function dateCountdown(
   iso: string | null
-): { label: string; color: string } | null {
+): { label: string; days: number; color: string } | null {
   if (!iso) return null;
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return null;
@@ -384,7 +382,7 @@ function earningsInfo(
   const now = new Date();
   const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = Math.round((target.getTime() - today0.getTime()) / 86_400_000);
-  if (days < 0) return null; // stale/past date — show nothing rather than wrong
+  if (days < 0) return null;
 
   const dateStr = target.toLocaleDateString("en-US", {
     month: "short",
@@ -396,21 +394,18 @@ function earningsInfo(
   if (days === 0) label = `Today · ${dateStr}`;
   else if (days === 1) label = `Tomorrow · ${dateStr}`;
   else label = `in ${days}d · ${dateStr}`;
-  return { label, color };
+  return { label, days, color };
 }
 
-function EarningsRow({ date }: { date: string | null }) {
-  const info = earningsInfo(date);
+function EventLabel({ tag, iso }: { tag: string; iso: string | null }) {
+  const info = dateCountdown(iso);
   return (
-    <div
-      className="mt-2 pt-2 flex items-baseline gap-2"
-      style={{ borderTop: "1px solid var(--border)" }}
-    >
+    <div className="flex items-baseline gap-2">
       <span
         className="uppercase tracking-wider shrink-0"
         style={{ color: "var(--muted)", fontSize: 12 }}
       >
-        Earnings
+        {tag}
       </span>
       {info ? (
         <span
@@ -421,6 +416,31 @@ function EarningsRow({ date }: { date: string | null }) {
         </span>
       ) : (
         <span style={{ color: "var(--muted)", fontSize: 13 }}>—</span>
+      )}
+    </div>
+  );
+}
+
+function EventsRow({
+  earningsDate,
+  dividendDate,
+  exDividendDate,
+}: {
+  earningsDate: string | null;
+  dividendDate: string | null;
+  exDividendDate: string | null;
+}) {
+  return (
+    <div
+      className="mt-2 pt-2 space-y-1"
+      style={{ borderTop: "1px solid var(--border)" }}
+    >
+      <EventLabel tag="Earnings" iso={earningsDate} />
+      {(dividendDate || exDividendDate) && (
+        <div className="flex items-baseline gap-4 flex-wrap">
+          {dividendDate && <EventLabel tag="Dividend" iso={dividendDate} />}
+          {exDividendDate && <EventLabel tag="Ex-Div" iso={exDividendDate} />}
+        </div>
       )}
     </div>
   );
@@ -589,7 +609,11 @@ function StockCard({ stock }: { stock: StockResult }) {
       {/* I5 + earnings countdown */}
       <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
         <I5Cell {...stock.i5} />
-        <EarningsRow date={stock.next_earnings_date} />
+        <EventsRow
+          earningsDate={stock.next_earnings_date}
+          dividendDate={stock.next_dividend_date}
+          exDividendDate={stock.ex_dividend_date}
+        />
       </div>
 
       {/* News — collapsible, placeholder */}
@@ -767,7 +791,11 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
                 {/* I5 + earnings countdown */}
                 <TD>
                   <I5Cell {...stock.i5} />
-                  <EarningsRow date={stock.next_earnings_date} />
+                  <EventsRow
+                    earningsDate={stock.next_earnings_date}
+                    dividendDate={stock.next_dividend_date}
+                    exDividendDate={stock.ex_dividend_date}
+                  />
                 </TD>
               </tr>
             ))}
