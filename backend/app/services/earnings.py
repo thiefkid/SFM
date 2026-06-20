@@ -94,32 +94,49 @@ async def _finnhub_next_earnings(symbol: str, today: date) -> date | None:
             },
         )
         r.raise_for_status()
-        return _parse_finnhub(r.json(), today)
+        payload = r.json()
+        result = _parse_finnhub(payload, today)
+        logger.info("Finnhub earnings raw %s: rows=%d result=%s",
+                     symbol, len((payload or {}).get("earningsCalendar", [])), result)
+        return result
     except Exception as exc:
-        logger.info("Finnhub earnings failed for %s: %s", symbol, exc)
+        logger.warning("Finnhub earnings failed for %s: %s", symbol, exc)
         return None
 
 
 def _yf_next_earnings(symbol: str, today: date) -> date | None:
     try:
         cal = yf.Ticker(symbol).calendar
+        logger.info("yfinance calendar %s: keys=%s", symbol, list(cal.keys()) if isinstance(cal, dict) else type(cal).__name__)
     except Exception as exc:
-        logger.info("yfinance earnings failed for %s: %s", symbol, exc)
+        logger.warning("yfinance earnings failed for %s: %s", symbol, exc)
         return None
     return _parse_yf_calendar(cal, today)
+
+
+_YF_TIMEOUT = 15  # seconds
 
 
 async def _resolve_one(symbol: str, today: date) -> tuple[str, date | None]:
     d: date | None = None
     source = "none"
-    if settings.finnhub_api_key:
-        d = await _finnhub_next_earnings(symbol, today)
-        if d is not None:
-            source = "finnhub"
-    if d is None:
-        d = await asyncio.to_thread(_yf_next_earnings, symbol, today)
-        if d is not None:
-            source = "yfinance"
+    try:
+        if settings.finnhub_api_key:
+            d = await _finnhub_next_earnings(symbol, today)
+            if d is not None:
+                source = "finnhub"
+        if d is None:
+            try:
+                d = await asyncio.wait_for(
+                    asyncio.to_thread(_yf_next_earnings, symbol, today),
+                    timeout=_YF_TIMEOUT,
+                )
+                if d is not None:
+                    source = "yfinance"
+            except asyncio.TimeoutError:
+                logger.warning("yfinance earnings timed out for %s after %ds", symbol, _YF_TIMEOUT)
+    except Exception as exc:
+        logger.warning("Earnings resolution failed for %s: %s", symbol, exc)
     _cache[symbol] = (today, d)
     logger.info("Earnings %s: next=%s source=%s", symbol, d, source)
     return symbol, d
@@ -150,8 +167,17 @@ async def get_next_earnings(symbols: list[str]) -> dict[str, date | None]:
             to_fetch.append(s)
 
     if to_fetch:
-        resolved = await asyncio.gather(*[_resolve_one(s, today) for s in to_fetch])
-        for s, d in resolved:
+        # Stagger Finnhub calls slightly to avoid hitting the 60/min rate limit
+        # alongside quote requests that just ran.
+        resolved = await asyncio.gather(
+            *[_resolve_one(s, today) for s in to_fetch],
+            return_exceptions=True,
+        )
+        for item in resolved:
+            if isinstance(item, Exception):
+                logger.warning("Earnings resolution failed: %s", item)
+                continue
+            s, d = item
             result[s] = d
 
     return result

@@ -8,6 +8,7 @@ countdown can't show a stale/wrong date.
 
 from datetime import date, datetime
 
+import httpx
 import pytest
 
 from app.services import earnings as earnings_mod
@@ -192,3 +193,39 @@ class TestGetNextEarnings:
         assert set(result) == {"AAPL", "TSLA"}
         for d in result.values():
             assert d > date.today()
+
+    @pytest.mark.asyncio
+    async def test_yfinance_timeout_returns_none(self, monkeypatch):
+        import time
+
+        async def fake_finnhub(symbol, today):
+            return None
+
+        def slow_yf(symbol, today):
+            time.sleep(30)
+            return date(2026, 7, 15)
+
+        monkeypatch.setattr(earnings_mod.settings, "scraper_mock_mode", False)
+        monkeypatch.setattr(earnings_mod.settings, "finnhub_api_key", "key")
+        monkeypatch.setattr(earnings_mod, "_finnhub_next_earnings", fake_finnhub)
+        monkeypatch.setattr(earnings_mod, "_yf_next_earnings", slow_yf)
+        monkeypatch.setattr(earnings_mod, "_YF_TIMEOUT", 0.1)
+
+        result = await get_next_earnings(["AAPL"])
+        assert result["AAPL"] is None
+
+    @pytest.mark.asyncio
+    async def test_both_sources_fail_returns_none(self, monkeypatch):
+        async def failing_finnhub(symbol, today):
+            raise httpx.HTTPStatusError("403", request=None, response=None)
+
+        def failing_yf(symbol, today):
+            raise Exception("Yahoo blocked")
+
+        monkeypatch.setattr(earnings_mod.settings, "scraper_mock_mode", False)
+        monkeypatch.setattr(earnings_mod.settings, "finnhub_api_key", "key")
+        monkeypatch.setattr(earnings_mod, "_finnhub_next_earnings", failing_finnhub)
+        monkeypatch.setattr(earnings_mod, "_yf_next_earnings", failing_yf)
+
+        result = await get_next_earnings(["AAPL"])
+        assert result["AAPL"] is None
