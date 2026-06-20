@@ -21,6 +21,7 @@ from app.services.market_session import (
     _early_closes_for,
     _next_open,
     get_market_session,
+    last_trading_day,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -181,3 +182,54 @@ class TestNextOpen:
         # Christmas 2026 = Dec 25 (Fri). Next open after Dec 24:
         # Dec 25 = holiday, Dec 26 = Sat, Dec 27 = Sun → Dec 28
         assert _next_open(date(2026, 12, 24)) == date(2026, 12, 28)
+
+
+# ---------------------------------------------------------------------------
+# Last trading day (for close price swap)
+# ---------------------------------------------------------------------------
+
+class TestLastTradingDay:
+    def test_weekday_after_close(self):
+        # Monday 5 PM → Monday (session completed)
+        assert last_trading_day(_dt(2026, 6, 15, 17, 0)) == date(2026, 6, 15)
+
+    def test_weekday_at_close(self):
+        # Monday 4 PM exactly → Monday
+        assert last_trading_day(_dt(2026, 6, 15, 16, 0)) == date(2026, 6, 15)
+
+    def test_weekday_before_close(self):
+        # Monday 2 PM → previous Friday (session not yet completed)
+        assert last_trading_day(_dt(2026, 6, 15, 14, 0)) == date(2026, 6, 12)
+
+    def test_weekend_saturday(self):
+        # Sat Jun 20 → Fri Jun 19 is Juneteenth (holiday) → Thu Jun 18
+        assert last_trading_day(_dt(2026, 6, 20, 12, 0)) == date(2026, 6, 18)
+
+    def test_weekend_sunday(self):
+        # Sun Jun 21 → same: Fri Jun 19 is Juneteenth → Thu Jun 18
+        assert last_trading_day(_dt(2026, 6, 21, 12, 0)) == date(2026, 6, 18)
+
+    def test_weekend_no_holiday(self):
+        # Sat Jun 27 → Fri Jun 26 (no holiday)
+        assert last_trading_day(_dt(2026, 6, 27, 12, 0)) == date(2026, 6, 26)
+
+    def test_overnight_before_premarket(self):
+        # Tuesday 2 AM → Monday
+        assert last_trading_day(_dt(2026, 6, 16, 2, 0)) == date(2026, 6, 15)
+
+    def test_holiday_skipped(self):
+        # Independence Day 2026 observed Fri Jul 3 → Thu Jul 2
+        assert last_trading_day(_dt(2026, 7, 3, 12, 0)) == date(2026, 7, 2)
+
+    def test_early_close_after_1pm(self):
+        # Black Friday 2026 (Nov 27), 1:30 PM → that day (early close at 1 PM)
+        assert last_trading_day(_dt(2026, 11, 27, 13, 30)) == date(2026, 11, 27)
+
+    def test_early_close_before_1pm(self):
+        # Black Friday 2026 (Nov 27), 12:30 PM → still open, last completed = Wed Nov 25
+        # (Nov 26 = Thanksgiving holiday)
+        assert last_trading_day(_dt(2026, 11, 27, 12, 30)) == date(2026, 11, 25)
+
+    def test_late_night_after_ah(self):
+        # Monday 9 PM (after after-hours) → Monday
+        assert last_trading_day(_dt(2026, 6, 15, 21, 0)) == date(2026, 6, 15)

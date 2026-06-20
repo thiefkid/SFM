@@ -17,7 +17,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services import polygon as polygon_mod
-from app.services.polygon import _fetch_and_cache, _ts_to_date, get_daily_turnover
+from app.services.polygon import (
+    DailyBar, _fetch_and_cache, _ts_to_date, get_cached_bar, get_daily_turnover,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -50,9 +52,11 @@ def _make_bar(dt: date, volume: float, vwap: float) -> dict:
 def clear_cache():
     polygon_mod._cache.clear()
     polygon_mod._cache_populated_symbols.clear()
+    polygon_mod._bar_cache.clear()
     yield
     polygon_mod._cache.clear()
     polygon_mod._cache_populated_symbols.clear()
+    polygon_mod._bar_cache.clear()
 
 
 class TestFetchAndCache:
@@ -283,3 +287,129 @@ class TestI4FromPolygon:
         # Should fall back to DB
         assert history is db_history
         assert today_val == pytest.approx(500.0)
+
+
+# ---------------------------------------------------------------------------
+# Unit: DailyBar caching via _fetch_and_cache
+# ---------------------------------------------------------------------------
+
+class TestBarCache:
+    @pytest.mark.asyncio
+    async def test_fetch_and_cache_stores_bars(self):
+        bars = [_make_bar(date(2024, 6, 14), volume=1_000_000, vwap=150.25)]
+        with patch.object(polygon_mod, "_fetch_daily_aggs", new_callable=AsyncMock, return_value=bars):
+            await _fetch_and_cache("AAPL", "2024-06-10", "2024-06-17")
+
+        bar = get_cached_bar("AAPL", date(2024, 6, 14))
+        assert bar is not None
+        assert isinstance(bar, DailyBar)
+        assert bar.close == 102.0
+        assert bar.open == 100.0
+        assert bar.high == 105.0
+        assert bar.low == 95.0
+        assert bar.volume == 1_000_000.0
+        assert bar.vw == 150.25
+        assert bar.turnover == pytest.approx(1_000_000 * 150.25)
+
+    @pytest.mark.asyncio
+    async def test_cached_bar_not_found(self):
+        assert get_cached_bar("AAPL", date(2024, 6, 14)) is None
+
+    @pytest.mark.asyncio
+    async def test_multiple_bars_cached(self):
+        bars = [
+            _make_bar(date(2024, 6, 14), 1_000_000, 150.0),
+            _make_bar(date(2024, 6, 17), 2_000_000, 155.0),
+        ]
+        with patch.object(polygon_mod, "_fetch_daily_aggs", new_callable=AsyncMock, return_value=bars):
+            await _fetch_and_cache("TSLA", "2024-06-10", "2024-06-17")
+
+        bar1 = get_cached_bar("TSLA", date(2024, 6, 14))
+        bar2 = get_cached_bar("TSLA", date(2024, 6, 17))
+        assert bar1 is not None
+        assert bar2 is not None
+        assert bar1.volume == 1_000_000.0
+        assert bar2.volume == 2_000_000.0
+
+    @pytest.mark.asyncio
+    async def test_missing_ohlc_defaults_to_zero(self):
+        ts = int(datetime(2024, 6, 14, tzinfo=timezone.utc).timestamp() * 1000)
+        bars = [{"t": ts, "v": 1000, "vw": 100.0}]
+        with patch.object(polygon_mod, "_fetch_daily_aggs", new_callable=AsyncMock, return_value=bars):
+            await _fetch_and_cache("NOHLC", "2024-06-10", "2024-06-17")
+
+        bar = get_cached_bar("NOHLC", date(2024, 6, 14))
+        assert bar is not None
+        assert bar.open == 0.0
+        assert bar.high == 0.0
+        assert bar.low == 0.0
+        assert bar.close == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Integration: close price swap logic
+# ---------------------------------------------------------------------------
+
+class TestClosePriceSwap:
+    def test_polygon_bar_overrides_snapshot_after_close(self):
+        from dataclasses import replace
+        from app.services.futu_scraper import StockSnapshot
+
+        snapshot = StockSnapshot(
+            symbol="AAPL", rt_price=150.50, open_price=149.00,
+            prev_close=148.00, today_high=151.00, today_low=147.00,
+            today_value=5_000_000.0,
+        )
+
+        polygon_mod._bar_cache[("AAPL", date(2024, 6, 14))] = DailyBar(
+            date=date(2024, 6, 14),
+            open=149.25, high=151.50, low=147.25, close=150.75,
+            volume=10_000_000, vw=150.0, turnover=1_500_000_000,
+        )
+
+        bar = get_cached_bar("AAPL", date(2024, 6, 14))
+        assert bar is not None
+        swapped = replace(snapshot,
+            rt_price=bar.close,
+            open_price=bar.open,
+            today_high=bar.high,
+            today_low=bar.low,
+        )
+
+        assert swapped.rt_price == 150.75
+        assert swapped.open_price == 149.25
+        assert swapped.today_high == 151.50
+        assert swapped.today_low == 147.25
+        assert swapped.prev_close == 148.00  # prev_close NOT swapped
+        assert swapped.today_value == 5_000_000.0  # today_value NOT swapped
+
+    def test_indicators_compute_correctly_with_swapped_prices(self):
+        from app.services.indicators import compute_i1, compute_i2, compute_i3
+
+        close = 150.75   # Polygon official close
+        open_ = 149.25   # Polygon official open
+        high = 151.50    # Polygon official high
+        prev_close = 148.00  # Finnhub prev close
+
+        i1 = compute_i1(close, open_)
+        assert i1 == pytest.approx((150.75 - 149.25) / 149.25)
+
+        i2 = compute_i2(close, prev_close)
+        assert i2 == pytest.approx((150.75 - 148.00) / 148.00)
+
+        i3 = compute_i3(close, open_, high)
+        assert i3 == pytest.approx((150.75 - 149.25) / (151.50 - 149.25))
+
+    def test_no_swap_when_bar_unavailable(self):
+        bar = get_cached_bar("AAPL", date(2099, 1, 1))
+        assert bar is None
+
+    def test_no_swap_when_close_is_zero(self):
+        polygon_mod._bar_cache[("BAD", date(2024, 6, 14))] = DailyBar(
+            date=date(2024, 6, 14),
+            open=0.0, high=0.0, low=0.0, close=0.0,
+            volume=0, vw=0, turnover=0,
+        )
+        bar = get_cached_bar("BAD", date(2024, 6, 14))
+        assert bar is not None
+        assert bar.close == 0.0  # swap should be skipped (close > 0 check)

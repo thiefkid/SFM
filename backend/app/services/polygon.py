@@ -13,6 +13,7 @@ Today's live turnover comes from Finnhub/yfinance, not Polygon.
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
@@ -30,6 +31,21 @@ _http_client = httpx.AsyncClient(timeout=15.0)
 # because it accumulates through the trading day.
 _cache: dict[tuple[str, date], float] = {}
 _cache_populated_symbols: set[str] = set()
+
+
+@dataclass
+class DailyBar:
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    vw: float
+    turnover: float
+
+
+_bar_cache: dict[tuple[str, date], DailyBar] = {}
 
 
 async def _fetch_daily_aggs(symbol: str, from_date: str, to_date: str) -> list[dict]:
@@ -80,6 +96,16 @@ async def _fetch_and_cache(symbol: str, from_date: str, to_date: str) -> dict[da
             turnover = float(v) * float(vw)
             _cache[(symbol, d)] = turnover
             result[d] = turnover
+            _bar_cache[(symbol, d)] = DailyBar(
+                date=d,
+                open=float(bar.get("o", 0)),
+                high=float(bar.get("h", 0)),
+                low=float(bar.get("l", 0)),
+                close=float(bar.get("c", 0)),
+                volume=float(v),
+                vw=float(vw),
+                turnover=turnover,
+            )
     logger.info("Polygon %s: %d bars → %d turnover days (range %s to %s)",
                 symbol, len(bars), len(result), from_date, to_date)
     _cache_populated_symbols.add(symbol)
@@ -121,6 +147,7 @@ async def get_daily_turnover(
 
     # Build result from cache
     out: dict[str, dict[date, float]] = {}
+    logger.info("Polygon bar cache: %d entries total", len(_bar_cache))
     for s in symbols:
         turnover_by_date: dict[date, float] = {}
         for d_offset in range(days + 10):
@@ -133,3 +160,8 @@ async def get_daily_turnover(
                      s, len(turnover_by_date),
                      {d.isoformat(): f"${v:,.0f}" for d, v in sorted(turnover_by_date.items())[-3:]})
     return out
+
+
+def get_cached_bar(symbol: str, bar_date: date) -> DailyBar | None:
+    """Return cached Polygon daily bar for a specific symbol/date, or None."""
+    return _bar_cache.get((symbol, bar_date))

@@ -24,7 +24,7 @@ from app.services import indicators as ind_engine
 from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
 from app.services import polygon as polygon_service
 from app.services import quotes as quote_service
-from app.services.market_session import get_market_session
+from app.services.market_session import get_market_session, last_trading_day
 from app.services.historical import (
     ATHResult, PastValuesResult, YearHighResult,
     ensure_fresh, get_ath_status, get_past_values, get_year_high, _now_et,
@@ -464,9 +464,32 @@ async def _do_refresh() -> RefreshResponse:
     # Empty dict on failure → close×volume fallback via DB history.
     polygon_turnover = await polygon_service.get_daily_turnover(symbols)
 
-    # Step 3+4: backfill history + compute indicators for each symbol.
-    # One shared "now" so freshness, ATH and 52-week high all agree on the clock.
+    # One shared "now" so freshness, ATH, 52-week high and session all agree.
     now_et = _now_et()
+    session_info = get_market_session(now_et)
+
+    # Close price swap: after the regular session ends, replace Finnhub's
+    # frozen last-trade values with Polygon's official daily candle. This
+    # gives I1/I2/I3 the authoritative closing auction price, open, and high.
+    # If Polygon's EOD bar hasn't posted yet, Finnhub values serve as stopgap.
+    if session_info["session"] in ("after_hours", "closed"):
+        trading_day = last_trading_day(now_et)
+        for i, snap in enumerate(snapshots):
+            bar = polygon_service.get_cached_bar(snap.symbol, trading_day)
+            if bar and bar.close > 0:
+                snapshots[i] = replace(snap,
+                    rt_price=bar.close,
+                    open_price=bar.open,
+                    today_high=bar.high,
+                    today_low=bar.low,
+                )
+                logger.info("Close swap %s: Polygon official candle date=%s close=%.2f open=%.2f high=%.2f low=%.2f",
+                            snap.symbol, trading_day, bar.close, bar.open, bar.high, bar.low)
+            else:
+                logger.info("Close swap %s: Polygon bar unavailable for %s, using Finnhub frozen values",
+                            snap.symbol, trading_day)
+
+    # Step 3+4: backfill history + compute indicators for each symbol.
     tasks = [
         _process_symbol(
             snap.symbol, snap, nasdaq, now_et,
@@ -497,7 +520,6 @@ async def _do_refresh() -> RefreshResponse:
         for i, ind in enumerate(all_indicators)
     ]
 
-    session_info = get_market_session(now_et)
     response = RefreshResponse(
         refreshed_at=datetime.now(tz=timezone.utc).isoformat(),
         market_session=MarketSessionModel(**session_info),

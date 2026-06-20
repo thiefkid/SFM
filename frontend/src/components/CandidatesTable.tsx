@@ -307,12 +307,12 @@ function StockCard({ stock, debug }: { stock: StockResult; debug: boolean }) {
 
       {/* I1 / I2 / I3 */}
       <div className="grid grid-cols-3 gap-3">
-        <CardStat label="I1 · Open">
+        <CardStat label="I1 · Body">
           <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i1), fontSize: 15 }}>
             {fmtPct(stock.i1)}
           </span>
         </CardStat>
-        <CardStat label="I2 · Chg">
+        <CardStat label="I2 · Gain">
           <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i2), fontSize: 15 }}>
             {fmtPct(stock.i2)}
           </span>
@@ -405,9 +405,9 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
               <TH>#</TH>
               <TH>Symbol</TH>
               <TH>Price</TH>
-              <TH style={{ minWidth: 120 }}>I1 — Open</TH>
-              <TH style={{ minWidth: 130 }}>I2 — Change</TH>
-              <TH style={{ minWidth: 140 }}>I3 — Range</TH>
+              <TH style={{ minWidth: 140 }}>I1 — Candle Body</TH>
+              <TH style={{ minWidth: 140 }}>I2 — Day Gain</TH>
+              <TH style={{ minWidth: 150 }}>I3 — Close in Range</TH>
               <TH style={{ minWidth: 220 }}>I4 — Volume (15d)</TH>
               <TH style={{ minWidth: 190 }}>I5 — ATH / 52W</TH>
             </tr>

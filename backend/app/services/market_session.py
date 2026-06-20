@@ -247,6 +247,32 @@ def get_market_session(now_et) -> dict:
     }
 
 
+def last_trading_day(now_et) -> date:
+    """Most recent date whose regular session has completed.
+
+    Holiday-aware: skips weekends and market holidays. Used to determine
+    which day's Polygon bar to use for the official close price swap.
+    """
+    today = now_et.date()
+    t = now_et.time()
+    wd = today.weekday()
+
+    holidays = _holidays_for(today.year)
+    early_closes = _early_closes_for(today.year)
+
+    if wd < 5 and today not in holidays:
+        close_time = _EARLY_CLOSE if today in early_closes else _REGULAR_CLOSE
+        if t >= close_time:
+            return today
+
+    d = today - timedelta(days=1)
+    for _ in range(10):
+        if d.weekday() < 5 and d not in _holidays_for(d.year):
+            return d
+        d -= timedelta(days=1)
+    return d
+
+
 def _next_open(from_date: date) -> date:
     """Find the next trading day (skipping weekends and holidays)."""
     d = from_date + timedelta(days=1)
