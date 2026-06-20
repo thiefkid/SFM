@@ -50,17 +50,85 @@ function i3BarColor(value: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Cell components
+// Formula builders (tap-to-reveal)
 // ---------------------------------------------------------------------------
 
-function I3Cell({ value }: { value: number | null }) {
-  if (value === null) return <span style={{ color: "var(--muted)" }}>—</span>;
+function i1Formula(s: StockResult): string | null {
+  if (s.open_price <= 0) return null;
+  return `(${s.rt_price.toFixed(2)} − ${s.open_price.toFixed(2)}) / ${s.open_price.toFixed(2)}`;
+}
+
+function i2Formula(s: StockResult): string | null {
+  if (s.prev_close <= 0) return null;
+  return `(${s.rt_price.toFixed(2)} − ${s.prev_close.toFixed(2)}) / ${s.prev_close.toFixed(2)}`;
+}
+
+function i3Formula(s: StockResult): string | null {
+  if (s.open_price <= 0 || s.today_high <= s.open_price) return null;
+  return `(${s.rt_price.toFixed(2)} − ${s.open_price.toFixed(2)}) / (${s.today_high.toFixed(2)} − ${s.open_price.toFixed(2)})`;
+}
+
+// ---------------------------------------------------------------------------
+// Tappable indicator cells (tap value → shows formula)
+// ---------------------------------------------------------------------------
+
+function TappablePct({
+  value,
+  formula,
+  colorFn = pctColor,
+}: {
+  value: number | null;
+  formula: string | null;
+  colorFn?: (v: number | null) => string;
+}) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <div className="flex flex-col gap-1">
-      <span className="tabular-nums font-semibold" style={{ color: i3Color(value) }}>
+    <div
+      className="cursor-pointer select-none"
+      onClick={() => formula && setExpanded((e) => !e)}
+    >
+      <span
+        className="tabular-nums font-semibold"
+        style={{ color: colorFn(value), fontSize: 15 }}
+      >
         {fmtPct(value)}
       </span>
-      <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
+      {expanded && formula && (
+        <div
+          className="mt-1 font-mono leading-tight"
+          style={{ fontSize: 11, color: "var(--gold)", opacity: 0.7 }}
+        >
+          {formula}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TappableI3({
+  value,
+  formula,
+}: {
+  value: number | null;
+  formula: string | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (value === null) return <span style={{ color: "var(--muted)" }}>—</span>;
+  return (
+    <div
+      className="flex flex-col gap-1 cursor-pointer select-none"
+      onClick={() => formula && setExpanded((e) => !e)}
+    >
+      <span
+        className="tabular-nums font-semibold"
+        style={{ color: i3Color(value) }}
+      >
+        {fmtPct(value)}
+      </span>
+      <div
+        className="w-full h-1.5 rounded-full overflow-hidden"
+        style={{ background: "var(--border)" }}
+      >
         <div
           className="h-full rounded-full transition-all"
           style={{
@@ -69,21 +137,42 @@ function I3Cell({ value }: { value: number | null }) {
           }}
         />
       </div>
+      {expanded && formula && (
+        <div
+          className="mt-0.5 font-mono leading-tight"
+          style={{ fontSize: 11, color: "var(--gold)", opacity: 0.7 }}
+        >
+          {formula}
+        </div>
+      )}
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Cell components
+// ---------------------------------------------------------------------------
+
 function fmtTooltipDate(isoDate: string | null): string {
   if (!isoDate) return "—";
-  // Parse as date-only to avoid TZ shifting (e.g. "2026-06-13" → Jun 13).
   const [y, m, d] = isoDate.split("-").map(Number);
   if (!y || !m || !d) return isoDate;
   return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-    weekday: "short", month: "short", day: "numeric",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
   });
 }
 
-function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_date }: StockResult["i4"]) {
+function I4Cell({
+  today_value,
+  past_values,
+  avg,
+  ratio,
+  day_count,
+  dates,
+  today_date,
+}: StockResult["i4"]) {
   const allValues = [...past_values, today_value];
   const maxVal = Math.max(...allValues, 1);
   const [activeBar, setActiveBar] = useState<number | null>(null);
@@ -98,17 +187,23 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
 
   const todayIndex = past_values.length;
 
-  const getTooltipText = useCallback((index: number): string => {
-    if (index === todayIndex) {
-      return `${today_date ? fmtTooltipDate(today_date) : "Today"} (today) · ${fmtValue(today_value)}`;
-    }
-    return `${fmtTooltipDate(dates[index] ?? null)} · ${fmtValue(past_values[index])}`;
-  }, [todayIndex, today_date, today_value, dates, past_values]);
+  const getTooltipText = useCallback(
+    (index: number): string => {
+      if (index === todayIndex) {
+        return `${today_date ? fmtTooltipDate(today_date) : "Today"} (today) · ${fmtValue(today_value)}`;
+      }
+      return `${fmtTooltipDate(dates[index] ?? null)} · ${fmtValue(past_values[index])}`;
+    },
+    [todayIndex, today_date, today_value, dates, past_values]
+  );
 
   useEffect(() => {
     if (activeBar === null) return;
     const handleOutside = (e: TouchEvent | MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         setActiveBar(null);
       }
     };
@@ -121,8 +216,15 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
   }, [activeBar]);
 
   return (
-    <div className="flex flex-col gap-1.5" style={{ minWidth: 200 }} ref={containerRef}>
-      <div className="relative flex items-end gap-px" style={{ height: 36 }}>
+    <div
+      className="flex flex-col gap-1.5"
+      style={{ minWidth: 200 }}
+      ref={containerRef}
+    >
+      <div
+        className="relative flex items-end gap-px"
+        style={{ height: 36 }}
+      >
         {past_values.map((v, i) => {
           const heightPct = (v / maxVal) * 100;
           return (
@@ -131,10 +233,13 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
               className="flex-1 rounded-sm transition-colors cursor-pointer"
               style={{
                 height: `${Math.max(4, heightPct)}%`,
-                background: activeBar === i ? "var(--blue)" : "var(--muted)",
+                background:
+                  activeBar === i ? "var(--blue)" : "var(--muted)",
                 opacity: activeBar === i ? 1 : 0.5,
               }}
-              onClick={() => setActiveBar(activeBar === i ? null : i)}
+              onClick={() =>
+                setActiveBar(activeBar === i ? null : i)
+              }
             />
           );
         })}
@@ -142,9 +247,12 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
           className="flex-1 rounded-sm cursor-pointer"
           style={{
             height: `${Math.max(4, (today_value / maxVal) * 100)}%`,
-            background: activeBar === todayIndex ? "var(--blue)" : todayColor,
+            background:
+              activeBar === todayIndex ? "var(--blue)" : todayColor,
           }}
-          onClick={() => setActiveBar(activeBar === todayIndex ? null : todayIndex)}
+          onClick={() =>
+            setActiveBar(activeBar === todayIndex ? null : todayIndex)
+          }
         />
 
         {activeBar !== null && (
@@ -164,10 +272,17 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
         )}
       </div>
       <div className="flex items-center justify-between text-sm">
-        <span style={{ color: "var(--muted)" }}>{day_count}d avg: {fmtValue(avg)}</span>
+        <span style={{ color: "var(--muted)" }}>
+          {day_count}d avg: {fmtValue(avg)}
+        </span>
         <span
           className="tabular-nums font-semibold"
-          style={{ color: ratio !== null && ratio >= 1.5 ? "var(--gold)" : "var(--text)" }}
+          style={{
+            color:
+              ratio !== null && ratio >= 1.5
+                ? "var(--gold)"
+                : "var(--text)",
+          }}
         >
           {ratio !== null ? `${ratio.toFixed(2)}x` : "—"}
         </span>
@@ -179,23 +294,41 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
 function fmtDateShort(isoDate: string | null): string {
   if (!isoDate) return "—";
   return new Date(isoDate).toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   });
 }
 
-function I5Cell({ is_ath, ath_price, ath_date, days_since_ath, year_high, year_high_date }: StockResult["i5"]) {
+function I5Cell({
+  is_ath,
+  ath_price,
+  ath_date,
+  days_since_ath,
+  year_high,
+  year_high_date,
+}: StockResult["i5"]) {
   return (
     <div className="flex flex-col gap-1.5 text-sm">
       {is_ath ? (
         <span
           className="inline-flex items-center gap-1 px-3 py-1 rounded font-bold w-fit"
-          style={{ background: "#3a2a10", color: "var(--gold)", fontSize: 14 }}
+          style={{
+            background: "#3a2a10",
+            color: "var(--gold)",
+            fontSize: 14,
+          }}
         >
           ATH TODAY
         </span>
       ) : (
         <div className="flex flex-col gap-0.5">
-          <span className="uppercase tracking-wider" style={{ color: "var(--muted)", fontSize: 12 }}>ATH</span>
+          <span
+            className="uppercase tracking-wider"
+            style={{ color: "var(--muted)", fontSize: 12 }}
+          >
+            ATH
+          </span>
           <span className="tabular-nums" style={{ color: "var(--text)" }}>
             {ath_price ? `$${ath_price.toFixed(2)}` : "N/A"}
           </span>
@@ -213,12 +346,19 @@ function I5Cell({ is_ath, ath_price, ath_date, days_since_ath, year_high, year_h
       <div style={{ borderTop: "1px solid var(--border)" }} />
 
       <div className="flex flex-col gap-0.5">
-        <span className="uppercase tracking-wider" style={{ color: "var(--muted)", fontSize: 12 }}>52W High</span>
+        <span
+          className="uppercase tracking-wider"
+          style={{ color: "var(--muted)", fontSize: 12 }}
+        >
+          52W High
+        </span>
         <span className="tabular-nums" style={{ color: "var(--text)" }}>
           {year_high ? `$${year_high.toFixed(2)}` : "N/A"}
         </span>
         {year_high_date && (
-          <span style={{ color: "var(--muted)", fontSize: 13 }}>{fmtDateShort(year_high_date)}</span>
+          <span style={{ color: "var(--muted)", fontSize: 13 }}>
+            {fmtDateShort(year_high_date)}
+          </span>
         )}
       </div>
     </div>
@@ -229,7 +369,13 @@ function I5Cell({ is_ath, ath_price, ath_date, days_since_ath, year_high, year_h
 // Table
 // ---------------------------------------------------------------------------
 
-const TH = ({ children, style: extraStyle }: { children: React.ReactNode; style?: React.CSSProperties }) => (
+const TH = ({
+  children,
+  style: extraStyle,
+}: {
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}) => (
   <th
     className="px-4 py-3 text-left font-medium uppercase tracking-wider whitespace-nowrap"
     style={{
@@ -243,7 +389,13 @@ const TH = ({ children, style: extraStyle }: { children: React.ReactNode; style?
   </th>
 );
 
-const TD = ({ children, style: extraStyle }: { children: React.ReactNode; style?: React.CSSProperties }) => (
+const TD = ({
+  children,
+  style: extraStyle,
+}: {
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}) => (
   <td
     className="px-4 py-4"
     style={{
@@ -256,22 +408,23 @@ const TD = ({ children, style: extraStyle }: { children: React.ReactNode; style?
   </td>
 );
 
-function DebugFormula({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mt-1 font-mono text-amber-400/70 leading-tight" style={{ fontSize: 11 }}>
-      {children}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Mobile card (shown < md, where a 8-column table would force horizontal scroll)
+// Mobile card (shown < md)
 // ---------------------------------------------------------------------------
 
-function CardStat({ label, children }: { label: string; children: React.ReactNode }) {
+function CardStat({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-1 min-w-0">
-      <span className="uppercase tracking-wider" style={{ color: "var(--muted)", fontSize: 11 }}>
+      <span
+        className="uppercase tracking-wider"
+        style={{ color: "var(--muted)", fontSize: 11 }}
+      >
         {label}
       </span>
       {children}
@@ -279,62 +432,60 @@ function CardStat({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
-function StockCard({ stock, debug }: { stock: StockResult; debug: boolean }) {
+function StockCard({ stock }: { stock: StockResult }) {
   return (
     <div
       className="rounded-lg p-4 space-y-4"
-      style={{ border: "1px solid var(--border)", background: "var(--surface)" }}
+      style={{
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+      }}
     >
       {/* Symbol + price */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-baseline gap-2.5 min-w-0">
-          <span className="tabular-nums shrink-0" style={{ color: "var(--muted)", fontSize: 14 }}>
+          <span
+            className="tabular-nums shrink-0"
+            style={{ color: "var(--muted)", fontSize: 14 }}
+          >
             #{stock.rank}
           </span>
-          <span className="font-bold tracking-wide truncate" style={{ color: "var(--text-bright)", fontSize: 22 }}>
+          <span
+            className="font-bold tracking-wide truncate"
+            style={{ color: "var(--text-bright)", fontSize: 22 }}
+          >
             {stock.symbol}
           </span>
           {stock.scrape_error && (
-            <span className="shrink-0" style={{ color: "var(--gold)", fontSize: 12 }} title={stock.scrape_error}>
+            <span
+              className="shrink-0"
+              style={{ color: "var(--gold)", fontSize: 12 }}
+              title={stock.scrape_error}
+            >
               partial
             </span>
           )}
         </div>
-        <span className="tabular-nums font-semibold shrink-0" style={{ color: "var(--text-bright)", fontSize: 22 }}>
+        <span
+          className="tabular-nums font-semibold shrink-0"
+          style={{ color: "var(--text-bright)", fontSize: 22 }}
+        >
           {fmtPrice(stock.rt_price)}
         </span>
       </div>
 
-      {/* I1 / I2 / I3 */}
+      {/* I1 / I2 / I3 — tap any value to see formula */}
       <div className="grid grid-cols-3 gap-3">
         <CardStat label="I1 · Body">
-          <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i1), fontSize: 15 }}>
-            {fmtPct(stock.i1)}
-          </span>
+          <TappablePct value={stock.i1} formula={i1Formula(stock)} />
         </CardStat>
         <CardStat label="I2 · Gain">
-          <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i2), fontSize: 15 }}>
-            {fmtPct(stock.i2)}
-          </span>
+          <TappablePct value={stock.i2} formula={i2Formula(stock)} />
         </CardStat>
         <CardStat label="I3 · Range">
-          <I3Cell value={stock.i3} />
+          <TappableI3 value={stock.i3} formula={i3Formula(stock)} />
         </CardStat>
       </div>
-
-      {debug && (
-        <DebugFormula>
-          {stock.open_price > 0 && (
-            <div>I1=({stock.rt_price.toFixed(2)}−{stock.open_price.toFixed(2)})/{stock.open_price.toFixed(2)}</div>
-          )}
-          {stock.prev_close > 0 && (
-            <div>I2=({stock.rt_price.toFixed(2)}−{stock.prev_close.toFixed(2)})/{stock.prev_close.toFixed(2)}</div>
-          )}
-          {stock.open_price > 0 && stock.today_high > stock.open_price && (
-            <div>I3=({stock.rt_price.toFixed(2)}−{stock.open_price.toFixed(2)})/({stock.today_high.toFixed(2)}−{stock.open_price.toFixed(2)})</div>
-          )}
-        </DebugFormula>
-      )}
 
       {/* I4 */}
       <CardStat label="I4 · Volume (15d)">
@@ -353,17 +504,27 @@ function I6Footer({ stock }: { stock: StockResult }) {
   return (
     <div
       className="rounded-lg px-4 py-3 flex flex-wrap gap-x-6 gap-y-1"
-      style={{ border: "1px solid var(--border)", background: "var(--surface)", fontSize: 14 }}
+      style={{
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+        fontSize: 14,
+      }}
     >
       <span style={{ color: "var(--muted)" }}>
         I6 — NASDAQ from open:{" "}
-        <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i6.nasdaq_from_open_pct) }}>
+        <span
+          className="tabular-nums font-semibold"
+          style={{ color: pctColor(stock.i6.nasdaq_from_open_pct) }}
+        >
           {fmtPct(stock.i6.nasdaq_from_open_pct)}
         </span>
       </span>
       <span style={{ color: "var(--muted)" }}>
         from prev close:{" "}
-        <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i6.nasdaq_from_prev_close_pct) }}>
+        <span
+          className="tabular-nums font-semibold"
+          style={{ color: pctColor(stock.i6.nasdaq_from_prev_close_pct) }}
+        >
           {fmtPct(stock.i6.nasdaq_from_prev_close_pct)}
         </span>
       </span>
@@ -371,17 +532,21 @@ function I6Footer({ stock }: { stock: StockResult }) {
   );
 }
 
-interface Props {
-  stocks: StockResult[];
-  debug?: boolean;
-}
+// ---------------------------------------------------------------------------
+// Main export
+// ---------------------------------------------------------------------------
 
-export default function CandidatesTable({ stocks, debug = false }: Props) {
+export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
   if (stocks.length === 0) {
     return (
       <div
         className="flex items-center justify-center rounded-lg"
-        style={{ height: 200, color: "var(--muted)", fontSize: 16, border: "1px solid var(--border)" }}
+        style={{
+          height: 200,
+          color: "var(--muted)",
+          fontSize: 16,
+          border: "1px solid var(--border)",
+        }}
       >
         No data — tap Refresh to load
       </div>
@@ -390,15 +555,18 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Mobile: stacked cards (no horizontal scroll) */}
+      {/* Mobile: stacked cards */}
       <div className="md:hidden space-y-3">
         {stocks.map((stock) => (
-          <StockCard key={stock.symbol} stock={stock} debug={debug} />
+          <StockCard key={stock.symbol} stock={stock} />
         ))}
       </div>
 
       {/* Desktop / tablet: full table */}
-      <div className="hidden md:block overflow-x-auto rounded-lg" style={{ border: "1px solid var(--border)" }}>
+      <div
+        className="hidden md:block overflow-x-auto rounded-lg"
+        style={{ border: "1px solid var(--border)" }}
+      >
         <table className="w-full border-collapse text-left">
           <thead style={{ background: "var(--surface)" }}>
             <tr>
@@ -418,22 +586,39 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
                 key={stock.symbol}
                 className="transition-colors"
                 style={{ background: "transparent" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.background =
+                    "rgba(255,255,255,0.02)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background = "transparent")
+                }
               >
                 <TD>
-                  <span className="tabular-nums" style={{ color: "var(--muted)", fontSize: 14 }}>
+                  <span
+                    className="tabular-nums"
+                    style={{ color: "var(--muted)", fontSize: 14 }}
+                  >
                     {stock.rank}
                   </span>
                 </TD>
 
                 <TD>
                   <div className="flex flex-col">
-                    <span className="font-bold tracking-wide" style={{ color: "var(--text-bright)", fontSize: 16 }}>
+                    <span
+                      className="font-bold tracking-wide"
+                      style={{
+                        color: "var(--text-bright)",
+                        fontSize: 16,
+                      }}
+                    >
                       {stock.symbol}
                     </span>
                     {stock.scrape_error && (
-                      <span style={{ color: "var(--gold)", fontSize: 13 }} title={stock.scrape_error}>
+                      <span
+                        style={{ color: "var(--gold)", fontSize: 13 }}
+                        title={stock.scrape_error}
+                      >
                         partial
                       </span>
                     )}
@@ -441,43 +626,39 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
                 </TD>
 
                 <TD>
-                  <span className="tabular-nums font-semibold" style={{ color: "var(--text-bright)", fontSize: 16 }}>
+                  <span
+                    className="tabular-nums font-semibold"
+                    style={{
+                      color: "var(--text-bright)",
+                      fontSize: 16,
+                    }}
+                  >
                     {fmtPrice(stock.rt_price)}
                   </span>
                 </TD>
 
-                {/* I1 */}
+                {/* I1 — tap to see formula */}
                 <TD>
-                  <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i1), fontSize: 15 }}>
-                    {fmtPct(stock.i1)}
-                  </span>
-                  {debug && stock.open_price > 0 && (
-                    <DebugFormula>
-                      ({stock.rt_price.toFixed(2)} - {stock.open_price.toFixed(2)}) / {stock.open_price.toFixed(2)}
-                    </DebugFormula>
-                  )}
+                  <TappablePct
+                    value={stock.i1}
+                    formula={i1Formula(stock)}
+                  />
                 </TD>
 
-                {/* I2 */}
+                {/* I2 — tap to see formula */}
                 <TD>
-                  <span className="tabular-nums font-semibold" style={{ color: pctColor(stock.i2), fontSize: 15 }}>
-                    {fmtPct(stock.i2)}
-                  </span>
-                  {debug && stock.prev_close > 0 && (
-                    <DebugFormula>
-                      ({stock.rt_price.toFixed(2)} - {stock.prev_close.toFixed(2)}) / {stock.prev_close.toFixed(2)}
-                    </DebugFormula>
-                  )}
+                  <TappablePct
+                    value={stock.i2}
+                    formula={i2Formula(stock)}
+                  />
                 </TD>
 
-                {/* I3 */}
+                {/* I3 — tap to see formula */}
                 <TD>
-                  <I3Cell value={stock.i3} />
-                  {debug && stock.open_price > 0 && stock.today_high > stock.open_price && (
-                    <DebugFormula>
-                      ({stock.rt_price.toFixed(2)} - {stock.open_price.toFixed(2)}) / ({stock.today_high.toFixed(2)} - {stock.open_price.toFixed(2)})
-                    </DebugFormula>
-                  )}
+                  <TappableI3
+                    value={stock.i3}
+                    formula={i3Formula(stock)}
+                  />
                 </TD>
 
                 {/* I4 */}
@@ -495,7 +676,7 @@ export default function CandidatesTable({ stocks, debug = false }: Props) {
         </table>
       </div>
 
-      {/* I6 footer — shared by both views */}
+      {/* I6 footer */}
       <I6Footer stock={stocks[0]} />
     </div>
   );

@@ -14,12 +14,8 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [debug, setDebug] = useState(false);
   const refreshingRef = useRef(false);
 
-  // Manual refresh (button click). The backend enforces single-flight: if a
-  // refresh (cron or another tab) is already running it returns 409, and the
-  // result arrives over SSE — so we keep the indicator on and wait, no error.
   const runRefresh = useCallback(async () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -27,11 +23,7 @@ export default function DashboardPage() {
     setError(null);
     try {
       const result = await fetchRefresh();
-      if (result === REFRESH_IN_PROGRESS) {
-        // Another refresh owns the lock; SSE will deliver refresh_done. Leave
-        // the indicator on; the SSE handler flips it off when data arrives.
-        return;
-      }
+      if (result === REFRESH_IN_PROGRESS) return;
       setData(result);
       setRefreshing(false);
     } catch (err) {
@@ -42,7 +34,6 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // On open: load persisted snapshot so the screen is never blank.
   useEffect(() => {
     let cancelled = false;
     fetchLast()
@@ -53,8 +44,6 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // SSE: listen for backend-driven refresh events (scheduler or another tab's
-  // manual click). EventSource auto-reconnects on disconnect.
   useEffect(() => {
     const url = `${API}/api/v1/events`;
     const es = new EventSource(url);
@@ -79,8 +68,6 @@ export default function DashboardPage() {
     });
 
     es.onerror = () => {
-      // EventSource will auto-reconnect; just clear the indicator while
-      // disconnected so the UI doesn't show a stale "Updating…".
       setRefreshing(false);
     };
 
@@ -92,33 +79,23 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
-      {/* Header */}
+      {/* Header — centered branding, compact refresh */}
       <header
-        className="flex items-center justify-between gap-3 px-4 sm:px-6 pt-safe pb-4 sm:pb-5 border-b"
+        className="relative flex flex-col items-center px-4 sm:px-6 pt-safe pb-3 sm:pb-4 border-b"
         style={{ background: "var(--surface)", borderColor: "var(--border)" }}
       >
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-wide" style={{ color: "var(--text-bright)" }}>
-            SFM
-          </h1>
-          <p className="text-sm mt-0.5 italic" style={{ color: "var(--muted)" }}>
-            Patience compounds; conviction endures.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            onClick={() => setDebug((d) => !d)}
-            className={`px-3 py-2 rounded text-sm font-medium border transition-colors ${
-              debug
-                ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
-                : ""
-            }`}
-            style={debug ? {} : { color: "var(--muted)", borderColor: "var(--border)" }}
-          >
-            {debug ? "Debug ON" : "Debug"}
-          </button>
+        <div className="absolute top-4 right-4 sm:top-5 sm:right-6">
           <RefreshButton loading={refreshing} onClick={runRefresh} />
         </div>
+        <h1
+          className="text-2xl sm:text-3xl font-bold tracking-[0.25em]"
+          style={{ color: "var(--text-bright)" }}
+        >
+          SFM
+        </h1>
+        <p className="text-xs sm:text-sm mt-1 italic" style={{ color: "var(--muted)" }}>
+          Patience compounds; conviction endures.
+        </p>
       </header>
 
       {/* NASDAQ bar */}
@@ -126,7 +103,6 @@ export default function DashboardPage() {
         nasdaq={data?.nasdaq ?? emptyNasdaq}
         refreshedAt={data?.refreshed_at ?? null}
         refreshing={refreshing}
-        debug={debug}
         marketSession={data?.market_session ?? null}
       />
 
@@ -153,7 +129,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <CandidatesTable stocks={data?.stocks ?? []} debug={debug} />
+        <CandidatesTable stocks={data?.stocks ?? []} />
 
         {/* Indicator legend */}
         <div
@@ -162,14 +138,14 @@ export default function DashboardPage() {
         >
           <p className="font-medium mb-2" style={{ color: "var(--muted)" }}>Indicator Reference</p>
           <p className="mb-2" style={{ color: "var(--muted)", fontSize: 12 }}>
-            Close = real-time price during session · official closing price after market close
+            Close = real-time price during session · official closing price after market close · tap any indicator to see its formula
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-1" style={{ color: "var(--muted)" }}>
             <span><span style={{ color: "var(--text)" }}>I1</span> — Candle Body: (close − open) / open</span>
             <span><span style={{ color: "var(--text)" }}>I2</span> — Full-Day Gain: (close − prev close) / prev close</span>
             <span><span style={{ color: "var(--text)" }}>I3</span> — Close in Range: (close − open) / (high − open) · 1.0 = at high, 0 = at open</span>
             <span><span style={{ color: "var(--text)" }}>I4</span> — 15-day trading value history + today (highlighted) · yellow if &gt;1.5× avg</span>
-            <span><span style={{ color: "var(--text)" }}>I5</span> — all-time high (★ if new ATH today) + 52-week high price &amp; date</span>
+            <span><span style={{ color: "var(--text)" }}>I5</span> — all-time high + 52-week high price &amp; date</span>
             <span><span style={{ color: "var(--text)" }}>I6</span> — NASDAQ % change (shown in table footer)</span>
           </div>
         </div>

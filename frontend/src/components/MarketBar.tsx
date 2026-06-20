@@ -32,11 +32,10 @@ interface Props {
   nasdaq: NasdaqResult;
   refreshedAt: string | null;
   refreshing?: boolean;
-  debug?: boolean;
   marketSession?: MarketSession | null;
 }
 
-export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, debug = false, marketSession }: Props) {
+export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, marketSession }: Props) {
   const time = refreshedAt
     ? new Date(refreshedAt).toLocaleTimeString("en-US", {
         timeZone: "America/New_York",
@@ -83,22 +82,8 @@ export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, deb
 
       <span style={{ color: "var(--border)" }}>|</span>
 
-      <div className="flex flex-col gap-0.5">
-        <Pct value={nasdaq.from_open_pct} label="from open" />
-        {debug && nasdaq.open_level > 0 && (
-          <span className="font-mono text-amber-400/70" style={{ fontSize: 11 }}>
-            ({nasdaq.rt_level.toFixed(2)} - {nasdaq.open_level.toFixed(2)}) / {nasdaq.open_level.toFixed(2)}
-          </span>
-        )}
-      </div>
-      <div className="flex flex-col gap-0.5">
-        <Pct value={nasdaq.from_prev_close_pct} label="prev close" />
-        {debug && nasdaq.prev_close > 0 && (
-          <span className="font-mono text-amber-400/70" style={{ fontSize: 11 }}>
-            ({nasdaq.rt_level.toFixed(2)} - {nasdaq.prev_close.toFixed(2)}) / {nasdaq.prev_close.toFixed(2)}
-          </span>
-        )}
-      </div>
+      <Pct value={nasdaq.from_open_pct} label="from open" />
+      <Pct value={nasdaq.from_prev_close_pct} label="prev close" />
 
       {nasdaq.error && (
         <span className="text-sm" style={{ color: "var(--gold)" }}>NASDAQ: {nasdaq.error}</span>
