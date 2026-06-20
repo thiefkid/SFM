@@ -309,43 +309,50 @@ function I5Cell({
   year_high_date,
 }: StockResult["i5"]) {
   return (
-    <div className="flex flex-col gap-1.5 text-sm">
-      {is_ath ? (
+    <div className="flex gap-4 text-sm">
+      {/* ATH */}
+      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
         <span
-          className="inline-flex items-center gap-1 px-3 py-1 rounded font-bold w-fit"
-          style={{
-            background: "#3a2a10",
-            color: "var(--gold)",
-            fontSize: 14,
-          }}
+          className="uppercase tracking-wider"
+          style={{ color: "var(--muted)", fontSize: 12 }}
         >
-          ATH TODAY
+          ATH
         </span>
-      ) : (
-        <div className="flex flex-col gap-0.5">
-          <span
-            className="uppercase tracking-wider"
-            style={{ color: "var(--muted)", fontSize: 12 }}
-          >
-            ATH
-          </span>
-          <span className="tabular-nums" style={{ color: "var(--text)" }}>
-            {ath_price ? `$${ath_price.toFixed(2)}` : "N/A"}
-          </span>
-          {ath_date && (
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>
-              {fmtDateShort(ath_date)}
-              {days_since_ath !== null && (
-                <span style={{ opacity: 0.6 }}> ({days_since_ath}d)</span>
-              )}
+        {is_ath ? (
+          <>
+            <span
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded font-bold w-fit"
+              style={{ background: "#3a2a10", color: "var(--gold)", fontSize: 13 }}
+            >
+              ATH TODAY
             </span>
-          )}
-        </div>
-      )}
+            {ath_price != null && (
+              <span className="tabular-nums" style={{ color: "var(--text)", fontSize: 13 }}>
+                ${ath_price.toFixed(2)}
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="tabular-nums" style={{ color: "var(--text)" }}>
+              {ath_price ? `$${ath_price.toFixed(2)}` : "N/A"}
+            </span>
+            {ath_date && (
+              <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                {fmtDateShort(ath_date)}
+                {days_since_ath !== null && (
+                  <span style={{ opacity: 0.6 }}> ({days_since_ath}d)</span>
+                )}
+              </span>
+            )}
+          </>
+        )}
+      </div>
 
-      <div style={{ borderTop: "1px solid var(--border)" }} />
+      <div style={{ borderLeft: "1px solid var(--border)" }} />
 
-      <div className="flex flex-col gap-0.5">
+      {/* 52W High */}
+      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
         <span
           className="uppercase tracking-wider"
           style={{ color: "var(--muted)", fontSize: 12 }}
@@ -356,11 +363,44 @@ function I5Cell({
           {year_high ? `$${year_high.toFixed(2)}` : "N/A"}
         </span>
         {year_high_date && (
-          <span style={{ color: "var(--muted)", fontSize: 13 }}>
+          <span style={{ color: "var(--muted)", fontSize: 12 }}>
             {fmtDateShort(year_high_date)}
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+function NewsSection() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ borderTop: "1px solid var(--border)" }}>
+      <button
+        className="flex items-center gap-2 w-full pt-3 pb-1 text-sm select-none"
+        style={{ color: "var(--muted)" }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <svg
+          className="h-3.5 w-3.5 transition-transform"
+          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        <span className="uppercase tracking-wider font-medium" style={{ fontSize: 12 }}>News</span>
+      </button>
+      {open && (
+        <div
+          className="py-2 text-sm italic"
+          style={{ color: "var(--muted)" }}
+        >
+          No news yet.
+        </div>
+      )}
     </div>
   );
 }
@@ -496,6 +536,9 @@ function StockCard({ stock }: { stock: StockResult }) {
       <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
         <I5Cell {...stock.i5} />
       </div>
+
+      {/* News — collapsible, placeholder */}
+      <NewsSection />
     </div>
   );
 }
