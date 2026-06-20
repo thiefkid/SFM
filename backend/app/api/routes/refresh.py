@@ -348,11 +348,9 @@ def _i4_from_polygon(
 ) -> tuple[PastValuesResult, float]:
     """Prefer Polygon tape-derived turnover (v × vw) for I4; fall back to DB.
 
-    Returns (history, today_value). History and today are taken from the *same*
-    basis so the bar chart is apples-to-apples: if Polygon has enough settled
-    days we use those; otherwise we keep the DB close×volume history.
-    Today's value uses Polygon if available (15-min delayed on free tier),
-    else falls back to the snapshot's close×volume.
+    Historical bars: Polygon (authoritative, settled EOD data).
+    Today's bar: always snapshot (Finnhub price × yfinance volume) because
+    Polygon free tier is EOD-only — no intraday data during market hours.
     """
     completed = sorted(d for d in polygon if d < today)
     if len(completed) >= 3:

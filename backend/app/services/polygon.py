@@ -5,9 +5,10 @@ Turnover = v × vw, where vw is the volume-weighted average price computed by
 Polygon from every trade on the consolidated tape. This is dramatically more
 accurate than close×volume (yfinance) or bar-aggregated VWAP from 15m bars.
 
-Free tier: 5 requests/minute, 15-min delayed quotes, full historical daily data.
+Free tier: 5 requests/minute, END-OF-DAY only (no intraday), 2 years history.
 We cache aggressively (settled daily bars never change) so API calls happen only
 once per process lifecycle — well within the rate limit.
+Today's live turnover comes from Finnhub/yfinance, not Polygon.
 """
 
 import asyncio

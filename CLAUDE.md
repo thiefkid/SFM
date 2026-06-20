@@ -14,4 +14,4 @@ This is a very important trading application that directly has PNL impact on tra
 - **Database**: Neon Postgres (daily prices, last refresh persistence, distributed lock)
 - **Data sources**: Finnhub (realtime quotes), Polygon.io (authoritative daily turnover), yfinance (volume, NASDAQ), Futu scraper (Heat List ranking)
 - **Refresh**: Backend-driven via GCP Cloud Scheduler (every 2 min, 3:40-4:00 PM ET weekdays). SSE push to frontend. Single-flight distributed DB lock.
-- **Turnover**: Polygon.io daily v × vw (tape-derived, authoritative). Cached per process — settled bars never change. Fallback to close×volume from DB.
+- **Turnover**: Historical days → Polygon.io daily v × vw (tape-derived, authoritative, EOD-only on free tier). Today → Finnhub price × yfinance volume (Polygon free tier has no intraday). Cached per process.
