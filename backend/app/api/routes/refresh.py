@@ -22,6 +22,7 @@ from app.core.database import async_session
 from app.models.last_refresh import LastRefresh
 from app.services import indicators as ind_engine
 from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
+from app.services import earnings as earnings_service
 from app.services import polygon as polygon_service
 from app.services import quotes as quote_service
 from app.services.market_session import get_market_session, last_trading_day
@@ -91,6 +92,7 @@ class StockResult(BaseModel):
     i4: I4Model
     i5: I5Model
     i6: I6Model
+    next_earnings_date: str | None = None   # ISO date of next results announcement
 
 
 class NasdaqResult(BaseModel):
@@ -127,7 +129,11 @@ def _fmt_date(d) -> str | None:
     return d.isoformat() if hasattr(d, "isoformat") else str(d)
 
 
-def _build_stock_result(rank: int, indicators: ind_engine.StockIndicators) -> StockResult:
+def _build_stock_result(
+    rank: int,
+    indicators: ind_engine.StockIndicators,
+    next_earnings: date | None = None,
+) -> StockResult:
     i4 = indicators.i4
     i5 = indicators.i5
     i6 = indicators.i6
@@ -164,6 +170,7 @@ def _build_stock_result(rank: int, indicators: ind_engine.StockIndicators) -> St
             nasdaq_from_open_pct=i6.nasdaq_from_open_pct,
             nasdaq_from_prev_close_pct=i6.nasdaq_from_prev_close_pct,
         ),
+        next_earnings_date=_fmt_date(next_earnings),
     )
 
 
@@ -460,9 +467,13 @@ async def _do_refresh() -> RefreshResponse:
     if all(s.error for s in snapshots):
         raise HTTPException(status_code=502, detail=f"All quote fetches failed: {snapshots[0].error}")
 
-    # Step 2b: authoritative daily turnover from Polygon (v × vw from tape).
-    # Empty dict on failure → close×volume fallback via DB history.
-    polygon_turnover = await polygon_service.get_daily_turnover(symbols)
+    # Step 2b: authoritative daily turnover from Polygon (v × vw from tape) and
+    # next earnings dates (Finnhub → yfinance) fetched concurrently. Both degrade
+    # gracefully: empty turnover → DB close×volume fallback; missing earnings → null.
+    polygon_turnover, earnings_dates = await asyncio.gather(
+        polygon_service.get_daily_turnover(symbols),
+        earnings_service.get_next_earnings(symbols),
+    )
 
     # One shared "now" so freshness, ATH, 52-week high and session all agree.
     now_et = _now_et()
@@ -516,7 +527,11 @@ async def _do_refresh() -> RefreshResponse:
     )
 
     stock_results = [
-        _build_stock_result(rank=i + 1, indicators=ind)
+        _build_stock_result(
+            rank=i + 1,
+            indicators=ind,
+            next_earnings=earnings_dates.get(ind.symbol),
+        )
         for i, ind in enumerate(all_indicators)
     ]
 

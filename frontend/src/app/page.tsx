@@ -145,7 +145,7 @@ export default function DashboardPage() {
             <span><span style={{ color: "var(--text)" }}>I2</span> — Close vs Prev Close: (close − prev close) / prev close</span>
             <span><span style={{ color: "var(--text)" }}>I3</span> — Close in Candle: (close − open) / (high − open) · 1.0 = at high, 0 = at open</span>
             <span><span style={{ color: "var(--text)" }}>I4</span> — 15-day trading value history + today (highlighted) · yellow if &gt;1.5× avg</span>
-            <span><span style={{ color: "var(--text)" }}>I5</span> — all-time high + 52-week high price &amp; date</span>
+            <span><span style={{ color: "var(--text)" }}>I5</span> — all-time high + 52-week high · next earnings countdown</span>
             <span><span style={{ color: "var(--text)" }}>I6</span> — NASDAQ % change (shown in table footer)</span>
           </div>
         </div>

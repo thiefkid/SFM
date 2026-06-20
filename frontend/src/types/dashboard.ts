@@ -37,6 +37,7 @@ export interface StockResult {
   i4: I4;
   i5: I5;
   i6: I6;
+  next_earnings_date: string | null;   // ISO date of next results announcement
 }
 
 export interface NasdaqResult {

@@ -372,6 +372,60 @@ function I5Cell({
   );
 }
 
+// Days until the next earnings date, plus a label/color. Parses the ISO date
+// as date-only (no TZ shift) and compares against the local calendar day.
+function earningsInfo(
+  iso: string | null
+): { label: string; color: string } | null {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const target = new Date(y, m - 1, d);
+  const now = new Date();
+  const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((target.getTime() - today0.getTime()) / 86_400_000);
+  if (days < 0) return null; // stale/past date — show nothing rather than wrong
+
+  const dateStr = target.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const soon = days <= 7;
+  const color = soon ? "var(--gold)" : "var(--text)";
+  let label: string;
+  if (days === 0) label = `Today · ${dateStr}`;
+  else if (days === 1) label = `Tomorrow · ${dateStr}`;
+  else label = `in ${days}d · ${dateStr}`;
+  return { label, color };
+}
+
+function EarningsRow({ date }: { date: string | null }) {
+  const info = earningsInfo(date);
+  return (
+    <div
+      className="mt-2 pt-2 flex items-baseline gap-2"
+      style={{ borderTop: "1px solid var(--border)" }}
+    >
+      <span
+        className="uppercase tracking-wider shrink-0"
+        style={{ color: "var(--muted)", fontSize: 12 }}
+      >
+        Earnings
+      </span>
+      {info ? (
+        <span
+          className="tabular-nums font-medium"
+          style={{ color: info.color, fontSize: 13 }}
+        >
+          {info.label}
+        </span>
+      ) : (
+        <span style={{ color: "var(--muted)", fontSize: 13 }}>—</span>
+      )}
+    </div>
+  );
+}
+
 function NewsSection() {
   const [open, setOpen] = useState(false);
   return (
@@ -532,9 +586,10 @@ function StockCard({ stock }: { stock: StockResult }) {
         <I4Cell {...stock.i4} />
       </CardStat>
 
-      {/* I5 */}
+      {/* I5 + earnings countdown */}
       <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
         <I5Cell {...stock.i5} />
+        <EarningsRow date={stock.next_earnings_date} />
       </div>
 
       {/* News — collapsible, placeholder */}
@@ -709,9 +764,10 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
                   <I4Cell {...stock.i4} />
                 </TD>
 
-                {/* I5 */}
+                {/* I5 + earnings countdown */}
                 <TD>
                   <I5Cell {...stock.i5} />
+                  <EarningsRow date={stock.next_earnings_date} />
                 </TD>
               </tr>
             ))}
