@@ -48,8 +48,17 @@ export interface NasdaqResult {
   error: string | null;
 }
 
+export interface MarketSession {
+  session: "pre_market" | "regular" | "after_hours" | "closed";
+  label: string;
+  is_holiday: boolean;
+  holiday_name: string | null;
+  next_open: string | null;
+}
+
 export interface DashboardData {
   refreshed_at: string;       // ISO 8601
+  market_session: MarketSession;
   nasdaq: NasdaqResult;
   stocks: StockResult[];
 }

@@ -127,6 +127,7 @@ export default function DashboardPage() {
         refreshedAt={data?.refreshed_at ?? null}
         refreshing={refreshing}
         debug={debug}
+        marketSession={data?.market_session ?? null}
       />
 
       {/* Main content */}

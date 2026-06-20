@@ -1,6 +1,6 @@
 "use client";
 
-import type { NasdaqResult } from "@/types/dashboard";
+import type { MarketSession, NasdaqResult } from "@/types/dashboard";
 
 function Pct({ value, label }: { value: number; label: string }) {
   const sign = value >= 0 ? "+" : "";
@@ -15,14 +15,28 @@ function Pct({ value, label }: { value: number; label: string }) {
   );
 }
 
+function sessionDot(session: MarketSession["session"]): { color: string; pulse: boolean } {
+  switch (session) {
+    case "regular":
+      return { color: "var(--green)", pulse: true };
+    case "pre_market":
+      return { color: "var(--gold)", pulse: true };
+    case "after_hours":
+      return { color: "var(--blue)", pulse: true };
+    default:
+      return { color: "var(--muted)", pulse: false };
+  }
+}
+
 interface Props {
   nasdaq: NasdaqResult;
   refreshedAt: string | null;
   refreshing?: boolean;
   debug?: boolean;
+  marketSession?: MarketSession | null;
 }
 
-export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, debug = false }: Props) {
+export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, debug = false, marketSession }: Props) {
   const time = refreshedAt
     ? new Date(refreshedAt).toLocaleTimeString("en-US", {
         timeZone: "America/New_York",
@@ -43,6 +57,29 @@ export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, deb
           {nasdaq.rt_level > 0 ? nasdaq.rt_level.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "—"}
         </span>
       </div>
+
+      {marketSession && (() => {
+        const dot = sessionDot(marketSession.session);
+        return (
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2 shrink-0">
+              {dot.pulse && (
+                <span
+                  className="absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping"
+                  style={{ background: dot.color }}
+                />
+              )}
+              <span
+                className="relative inline-flex h-2 w-2 rounded-full"
+                style={{ background: dot.color }}
+              />
+            </span>
+            <span className="text-sm font-medium whitespace-nowrap" style={{ color: dot.color }}>
+              {marketSession.label}
+            </span>
+          </div>
+        );
+      })()}
 
       <span style={{ color: "var(--border)" }}>|</span>
 

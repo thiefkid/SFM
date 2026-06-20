@@ -24,6 +24,7 @@ from app.services import indicators as ind_engine
 from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
 from app.services import polygon as polygon_service
 from app.services import quotes as quote_service
+from app.services.market_session import get_market_session
 from app.services.historical import (
     ATHResult, PastValuesResult, YearHighResult,
     ensure_fresh, get_ath_status, get_past_values, get_year_high, _now_et,
@@ -101,8 +102,17 @@ class NasdaqResult(BaseModel):
     error: str | None
 
 
+class MarketSessionModel(BaseModel):
+    session: str                # "pre_market" | "regular" | "after_hours" | "closed"
+    label: str                  # Human-readable e.g. "Regular Session"
+    is_holiday: bool
+    holiday_name: str | None
+    next_open: str | None       # ISO date of next trading day (when closed)
+
+
 class RefreshResponse(BaseModel):
     refreshed_at: str           # ISO 8601 with timezone
+    market_session: MarketSessionModel
     nasdaq: NasdaqResult
     stocks: list[StockResult]
 
@@ -487,8 +497,10 @@ async def _do_refresh() -> RefreshResponse:
         for i, ind in enumerate(all_indicators)
     ]
 
+    session_info = get_market_session(now_et)
     response = RefreshResponse(
         refreshed_at=datetime.now(tz=timezone.utc).isoformat(),
+        market_session=MarketSessionModel(**session_info),
         nasdaq=nasdaq_result,
         stocks=stock_results,
     )
@@ -507,6 +519,8 @@ async def get_last() -> RefreshResponse:
     last = await _load_last()
     if last is None:
         raise HTTPException(status_code=404, detail="No data yet — click Refresh Data")
+    # Always compute market_session live (persisted value would be stale)
+    last["market_session"] = get_market_session(_now_et())
     return RefreshResponse(**last)
 
 
@@ -514,6 +528,7 @@ async def get_last() -> RefreshResponse:
 async def get_status() -> dict:
     """Lightweight poll: is a refresh in-flight? When was the last one?"""
     status = await _load_refresh_status()
+    status["market_session"] = get_market_session(_now_et())
     return status
 
 
