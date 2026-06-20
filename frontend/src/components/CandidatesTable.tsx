@@ -96,7 +96,6 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
       ? "var(--blue)"
       : "var(--muted)";
 
-  const totalBars = past_values.length + 1;
   const todayIndex = past_values.length;
 
   const getTooltipText = useCallback((index: number): string => {
@@ -135,10 +134,7 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
                 background: activeBar === i ? "var(--blue)" : "var(--muted)",
                 opacity: activeBar === i ? 1 : 0.5,
               }}
-              title={getTooltipText(i)}
               onClick={() => setActiveBar(activeBar === i ? null : i)}
-              onMouseEnter={() => setActiveBar(i)}
-              onMouseLeave={() => setActiveBar(null)}
             />
           );
         })}
@@ -148,10 +144,7 @@ function I4Cell({ today_value, past_values, avg, ratio, day_count, dates, today_
             height: `${Math.max(4, (today_value / maxVal) * 100)}%`,
             background: activeBar === todayIndex ? "var(--blue)" : todayColor,
           }}
-          title={getTooltipText(todayIndex)}
           onClick={() => setActiveBar(activeBar === todayIndex ? null : todayIndex)}
-          onMouseEnter={() => setActiveBar(todayIndex)}
-          onMouseLeave={() => setActiveBar(null)}
         />
 
         {activeBar !== null && (
