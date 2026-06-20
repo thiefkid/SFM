@@ -1,6 +1,7 @@
 """
 /api/v1/refresh  — orchestrates full scrape + indicator pipeline
 /api/v1/last     — returns last successful result (shown on page load)
+/api/v1/events   — SSE stream for live refresh status (start / done)
 """
 
 import asyncio
@@ -9,9 +10,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
+from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.core.database import async_session
@@ -31,6 +33,15 @@ router = APIRouter()
 # In-memory cache of the last successful refresh result (fast path; DB is the
 # durable source of truth that survives Cloud Run cold starts / redeploys).
 _last_result: dict[str, Any] | None = None
+
+# In-memory event bus for SSE. Each broadcast bumps _sse_gen and sets the
+# asyncio.Condition so every waiting SSE generator wakes, reads the new state,
+# and pushes it to the browser. The generation counter avoids the set/clear
+# race inherent in plain asyncio.Event.
+_sse_lock = asyncio.Lock()
+_sse_cond = asyncio.Condition(_sse_lock)
+_sse_gen: int = 0
+_sse_state: dict[str, Any] = {"type": "idle"}
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +171,36 @@ def _mock_history(symbol: str) -> tuple[PastValuesResult, ATHResult, YearHighRes
     return history, ath, year_high
 
 
+async def _broadcast(state: dict[str, Any]) -> None:
+    """Wake all SSE listeners with a new state."""
+    global _sse_state, _sse_gen
+    async with _sse_cond:
+        _sse_state = state
+        _sse_gen += 1
+        _sse_cond.notify_all()
+
+
+async def _set_refreshing(flag: bool) -> None:
+    """Mark the DB row so SSE clients on other instances see it too."""
+    if settings.scraper_mock_mode:
+        return
+    try:
+        async with async_session() as session:
+            row = await session.get(LastRefresh, 1)
+            if row is not None:
+                row.is_refreshing = flag
+                await session.commit()
+            elif flag:
+                session.add(LastRefresh(
+                    id=1, payload="{}",
+                    refreshed_at=datetime.now(tz=timezone.utc),
+                    is_refreshing=True,
+                ))
+                await session.commit()
+    except Exception as exc:
+        logger.warning("Failed to set is_refreshing=%s: %s", flag, exc)
+
+
 async def _persist_last(payload: dict[str, Any]) -> None:
     """Upsert the single last_refresh row so /last survives cold starts."""
     if settings.scraper_mock_mode:
@@ -169,13 +210,16 @@ async def _persist_last(payload: dict[str, Any]) -> None:
             row = await session.get(LastRefresh, 1)
             now = datetime.now(tz=timezone.utc)
             if row is None:
-                session.add(LastRefresh(id=1, payload=json.dumps(payload), refreshed_at=now))
+                session.add(LastRefresh(
+                    id=1, payload=json.dumps(payload),
+                    refreshed_at=now, is_refreshing=False,
+                ))
             else:
                 row.payload = json.dumps(payload)
                 row.refreshed_at = now
+                row.is_refreshing = False
             await session.commit()
     except Exception as exc:
-        # Persistence is best-effort — never fail a refresh because the DB blinked.
         logger.warning("Failed to persist last_refresh: %s", exc)
 
 
@@ -193,6 +237,23 @@ async def _load_last() -> dict[str, Any] | None:
     except Exception as exc:
         logger.warning("Failed to load last_refresh from DB: %s", exc)
     return None
+
+
+async def _load_refresh_status() -> dict[str, Any]:
+    """Read the current refresh status from DB (cross-instance)."""
+    if settings.scraper_mock_mode:
+        return {"is_refreshing": False, "refreshed_at": None}
+    try:
+        async with async_session() as session:
+            row = (await session.execute(select(LastRefresh).limit(1))).scalar_one_or_none()
+            if row is not None:
+                return {
+                    "is_refreshing": row.is_refreshing,
+                    "refreshed_at": row.refreshed_at.isoformat() if row.refreshed_at else None,
+                }
+    except Exception as exc:
+        logger.warning("Failed to load refresh status: %s", exc)
+    return {"is_refreshing": False, "refreshed_at": None}
 
 
 async def _get_nasdaq() -> NasdaqSnapshot:
@@ -253,6 +314,21 @@ async def refresh() -> RefreshResponse:
     """
     global _last_result
 
+    # Signal SSE clients: refresh in progress (in-memory + DB for cross-instance)
+    await _broadcast({"type": "refresh_start"})
+    await _set_refreshing(True)
+
+    try:
+        return await _do_refresh()
+    except Exception:
+        await _broadcast({"type": "idle"})
+        await _set_refreshing(False)
+        raise
+
+
+async def _do_refresh() -> RefreshResponse:
+    global _last_result
+
     # Step 1: get candidates (Futu scrape — Playwright browser starts here)
     symbols = await scraper.get_top_active_symbols()
     if not symbols:
@@ -304,9 +380,11 @@ async def refresh() -> RefreshResponse:
         stocks=stock_results,
     )
 
-    # Cache in memory (fast path) and persist to DB (durable across cold starts)
+    # Cache in memory (fast path) and persist to DB (durable across cold starts).
+    # Also clears is_refreshing and broadcasts the finished data to SSE clients.
     _last_result = response.model_dump()
     await _persist_last(_last_result)
+    await _broadcast({"type": "refresh_done", "data": _last_result})
     return response
 
 
@@ -317,3 +395,82 @@ async def get_last() -> RefreshResponse:
     if last is None:
         raise HTTPException(status_code=404, detail="No data yet — click Refresh Data")
     return RefreshResponse(**last)
+
+
+@router.get("/status")
+async def get_status() -> dict:
+    """Lightweight poll: is a refresh in-flight? When was the last one?"""
+    status = await _load_refresh_status()
+    return status
+
+
+@router.get("/events")
+async def events(request: Request):
+    """SSE stream. Pushes refresh_start / refresh_done events in real time.
+
+    Same-instance refreshes are notified instantly via the in-memory event.
+    For cross-instance (scheduler hits a different Cloud Run instance), the
+    generator also polls the DB every 3s to detect `is_refreshing` changes.
+    """
+    async def stream():
+        last_refreshed_at: str | None = None
+        last_was_refreshing: bool | None = None
+        seen_gen = _sse_gen
+
+        # Send the current status immediately so the client syncs on connect.
+        status = await _load_refresh_status()
+        last_was_refreshing = status["is_refreshing"]
+        last_refreshed_at = status.get("refreshed_at")
+        if status["is_refreshing"]:
+            yield {"event": "refresh_start", "data": "{}"}
+        yield {"event": "status", "data": json.dumps(status)}
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            # Wait for an in-memory broadcast (fast, same-instance) or fall
+            # back to a 3s DB poll (cross-instance, scheduler on another pod).
+            got_broadcast = False
+            try:
+                async with asyncio.timeout(3.0):
+                    async with _sse_cond:
+                        await _sse_cond.wait_for(lambda: _sse_gen > seen_gen)
+                        seen_gen = _sse_gen
+                        state = _sse_state
+                got_broadcast = True
+                if state.get("type") == "refresh_start":
+                    yield {"event": "refresh_start", "data": "{}"}
+                elif state.get("type") == "refresh_done":
+                    yield {"event": "refresh_done", "data": json.dumps(state.get("data", {}))}
+            except asyncio.TimeoutError:
+                pass
+
+            if got_broadcast:
+                continue
+
+            # DB poll fallback: detect state changes made by other instances.
+            try:
+                status = await _load_refresh_status()
+                is_refreshing = status["is_refreshing"]
+                refreshed_at = status.get("refreshed_at")
+
+                if is_refreshing and last_was_refreshing is not True:
+                    yield {"event": "refresh_start", "data": "{}"}
+                    last_was_refreshing = True
+                elif not is_refreshing and last_was_refreshing is True:
+                    last = await _load_last()
+                    yield {"event": "refresh_done", "data": json.dumps(last or {})}
+                    last_was_refreshing = False
+                    last_refreshed_at = refreshed_at
+                elif not is_refreshing and refreshed_at != last_refreshed_at and last_refreshed_at is not None:
+                    last = await _load_last()
+                    yield {"event": "refresh_done", "data": json.dumps(last or {})}
+                    last_refreshed_at = refreshed_at
+
+                last_was_refreshing = is_refreshing
+                last_refreshed_at = refreshed_at
+            except Exception:
+                pass
+
+    return EventSourceResponse(stream())

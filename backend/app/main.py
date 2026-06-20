@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import create_tables, async_session
+import app.models  # noqa: F401  — register all models with Base.metadata before create_tables
 from app.api.routes import refresh as refresh_router
 
 # Emit INFO logs to stdout so Cloud Run captures them. Without this the root

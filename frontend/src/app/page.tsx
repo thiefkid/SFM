@@ -8,54 +8,20 @@ import RefreshButton from "@/components/RefreshButton";
 import { fetchLast, fetchRefresh } from "@/lib/api";
 import type { DashboardData } from "@/types/dashboard";
 
-// Auto-refresh window: every 2 min from 3:40–4:00 PM ET on weekdays. Gives a
-// "live, streaming" feel into the close without ever blanking the screen.
-const WINDOW_START_MIN = 15 * 60 + 40; // 15:40 ET
-const WINDOW_END_MIN = 16 * 60; // 16:00 ET
-const POLL_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
-const TICK_MS = 20 * 1000; // how often we check the clock
-
-/** Minutes-since-midnight and weekday in America/New_York, regardless of viewer TZ. */
-function nowET(): { minutes: number; weekday: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-    hour12: false,
-  }).formatToParts(new Date());
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
-  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
-  const wd = parts.find((p) => p.type === "weekday")?.value ?? "";
-  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wd);
-  return { minutes: hour * 60 + minute, weekday };
-}
-
-function inAutoWindow(): boolean {
-  const { minutes, weekday } = nowET();
-  const isWeekday = weekday >= 1 && weekday <= 5;
-  return isWeekday && minutes >= WINDOW_START_MIN && minutes <= WINDOW_END_MIN;
-}
+const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debug, setDebug] = useState(false);
-
-  // Refs so the polling interval reads live values without re-subscribing.
   const refreshingRef = useRef(false);
-  const hasDataRef = useRef(false);
-  const lastStartRef = useRef(0);
-  useEffect(() => { refreshingRef.current = refreshing; }, [refreshing]);
-  useEffect(() => { hasDataRef.current = data !== null; }, [data]);
 
-  // Core refresh. Background refreshes keep the current table on screen and only
-  // swap in new rows when they arrive — no blank flash, just a live indicator.
+  // Manual refresh (button click). The backend broadcasts SSE events for this
+  // too, but we also handle the response directly for error feedback.
   const runRefresh = useCallback(async () => {
-    if (refreshingRef.current) return; // never overlap requests
+    if (refreshingRef.current) return;
     refreshingRef.current = true;
-    lastStartRef.current = Date.now();
     setRefreshing(true);
     setError(null);
     try {
@@ -69,41 +35,52 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // On open: show the last persisted snapshot immediately (survives cold starts),
-  // then kick a fresh pull in the background if we have nothing yet.
+  // On open: load persisted snapshot so the screen is never blank.
   useEffect(() => {
     let cancelled = false;
     fetchLast()
       .then((d) => {
-        if (cancelled) return;
-        if (d) {
-          setData(d);
-          hasDataRef.current = true;
-        } else {
-          // Nothing cached anywhere → fetch so she never lands on a blank screen.
-          runRefresh();
-        }
+        if (!cancelled && d) setData(d);
       })
-      .catch(() => { if (!cancelled) runRefresh(); });
+      .catch(() => {});
     return () => { cancelled = true; };
-  }, [runRefresh]);
+  }, []);
 
-  // Auto-poll during the closing window. Checks the clock every 20s and fires a
-  // background refresh at most once per 2 min while in-window.
+  // SSE: listen for backend-driven refresh events (scheduler or another tab's
+  // manual click). EventSource auto-reconnects on disconnect.
   useEffect(() => {
-    const id = setInterval(() => {
-      if (!inAutoWindow()) return;
-      if (refreshingRef.current) return;
-      if (Date.now() - lastStartRef.current < POLL_INTERVAL_MS) return;
-      runRefresh();
-    }, TICK_MS);
-    return () => clearInterval(id);
-  }, [runRefresh]);
+    const url = `${API}/api/v1/events`;
+    const es = new EventSource(url);
+
+    es.addEventListener("refresh_start", () => {
+      setRefreshing(true);
+    });
+
+    es.addEventListener("refresh_done", (e: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(e.data) as DashboardData;
+        if (parsed.stocks) setData(parsed);
+      } catch { /* ignore parse errors */ }
+      setRefreshing(false);
+    });
+
+    es.addEventListener("status", (e: MessageEvent) => {
+      try {
+        const status = JSON.parse(e.data);
+        if (status.is_refreshing) setRefreshing(true);
+      } catch { /* ignore */ }
+    });
+
+    es.onerror = () => {
+      // EventSource will auto-reconnect; just clear the indicator while
+      // disconnected so the UI doesn't show a stale "Updating…".
+      setRefreshing(false);
+    };
+
+    return () => es.close();
+  }, []);
 
   const emptyNasdaq = { rt_level: 0, open_level: 0, prev_close: 0, from_open_pct: 0, from_prev_close_pct: 0, error: null };
-
-  // Big "fetching…" banner only on the very first load (no data yet). Once data
-  // is on screen, refreshes are silent + in-place via the live indicator.
   const showInitialLoading = refreshing && data === null;
 
   return (
@@ -170,7 +147,7 @@ export default function DashboardPage() {
 
         <CandidatesTable stocks={data?.stocks ?? []} debug={debug} />
 
-        {/* Indicator legend — subdued, not competing for attention */}
+        {/* Indicator legend */}
         <div
           className="rounded p-4 text-sm space-y-1"
           style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
