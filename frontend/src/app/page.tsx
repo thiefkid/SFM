@@ -63,9 +63,10 @@ export default function DashboardPage() {
     es.addEventListener("events_update", (e: MessageEvent) => {
       try {
         const eventsMap = JSON.parse(e.data) as Record<string, {
-          next_earnings_date: string | null;
-          next_dividend_date: string | null;
-          ex_dividend_date: string | null;
+          next_earnings_date?: string | null;
+          next_dividend_date?: string | null;
+          ex_dividend_date?: string | null;
+          market_cap?: number | null;
         }>;
         setData((prev) => {
           if (!prev?.stocks) return prev;

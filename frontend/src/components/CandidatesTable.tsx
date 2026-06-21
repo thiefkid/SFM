@@ -26,6 +26,14 @@ function fmtPrice(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+function fmtMarketCap(value: number | null | undefined): string | null {
+  if (value == null || value <= 0) return null;
+  if (value >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
+  if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(0)}M`;
+  return `$${value.toLocaleString()}`;
+}
+
 // ---------------------------------------------------------------------------
 // Color helpers — softer for dark-room viewing
 // ---------------------------------------------------------------------------
@@ -698,6 +706,15 @@ function StockCard({ stock }: { stock: StockResult }) {
           >
             {stock.symbol}
           </span>
+          {fmtMarketCap(stock.market_cap) && (
+            <span
+              className="tabular-nums shrink-0"
+              style={{ color: "var(--muted)", fontSize: 12 }}
+              title="Market capitalisation"
+            >
+              {fmtMarketCap(stock.market_cap)}
+            </span>
+          )}
           {stock.scrape_error && (
             <span
               className="shrink-0"
@@ -855,15 +872,26 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
 
                 <TD>
                   <div className="flex flex-col">
-                    <span
-                      className="font-bold tracking-wide"
-                      style={{
-                        color: "var(--text-bright)",
-                        fontSize: 16,
-                      }}
-                    >
-                      {stock.symbol}
-                    </span>
+                    <div className="flex items-baseline gap-1.5">
+                      <span
+                        className="font-bold tracking-wide"
+                        style={{
+                          color: "var(--text-bright)",
+                          fontSize: 16,
+                        }}
+                      >
+                        {stock.symbol}
+                      </span>
+                      {fmtMarketCap(stock.market_cap) && (
+                        <span
+                          className="tabular-nums"
+                          style={{ color: "var(--muted)", fontSize: 11 }}
+                          title="Market capitalisation"
+                        >
+                          {fmtMarketCap(stock.market_cap)}
+                        </span>
+                      )}
+                    </div>
                     {stock.scrape_error && (
                       <span
                         style={{ color: "var(--gold)", fontSize: 13 }}

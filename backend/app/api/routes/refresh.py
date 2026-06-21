@@ -25,6 +25,7 @@ from app.services import indicators as ind_engine
 from app.services.futu_scraper import NasdaqSnapshot, StockSnapshot, scraper
 from app.services import earnings as earnings_service
 from app.services import polygon as polygon_service
+from app.services import profile as profile_service
 from app.services import quotes as quote_service
 from app.services.market_session import get_market_session, last_trading_day
 from app.services.historical import (
@@ -96,6 +97,7 @@ class StockResult(BaseModel):
     next_earnings_date: str | None = None   # ISO date of next results announcement
     next_dividend_date: str | None = None   # ISO date of next dividend payment
     ex_dividend_date: str | None = None     # ISO ex-dividend date
+    market_cap: float | None = None         # market capitalisation in USD
 
 
 class NasdaqResult(BaseModel):
@@ -555,21 +557,25 @@ async def _do_refresh() -> RefreshResponse:
 
 
 async def _fetch_and_push_events(symbols: list[str]) -> None:
-    """Background task: fetch upcoming events and push to all SSE clients."""
+    """Background task: fetch auxiliary data (events + market cap) and push via SSE."""
     global _last_result
     try:
-        upcoming = await earnings_service.get_upcoming_events(symbols)
-        # Build a {symbol: {next_earnings_date, next_dividend_date, ex_dividend_date}} map
-        events_data: dict[str, dict[str, str | None]] = {}
+        upcoming, market_caps = await asyncio.gather(
+            earnings_service.get_upcoming_events(symbols),
+            profile_service.get_market_caps(symbols),
+        )
+        # Build a per-symbol map of all auxiliary fields.
+        events_data: dict[str, dict[str, Any]] = {}
         for sym in symbols:
             ev = upcoming.get(sym)
-            if ev is None:
-                continue
-            events_data[sym] = {
-                "next_earnings_date": _fmt_date(ev.next_earnings),
-                "next_dividend_date": _fmt_date(ev.next_dividend),
-                "ex_dividend_date": _fmt_date(ev.ex_dividend),
-            }
+            entry: dict[str, Any] = {"market_cap": market_caps.get(sym)}
+            if ev is not None:
+                entry.update({
+                    "next_earnings_date": _fmt_date(ev.next_earnings),
+                    "next_dividend_date": _fmt_date(ev.next_dividend),
+                    "ex_dividend_date": _fmt_date(ev.ex_dividend),
+                })
+            events_data[sym] = entry
         # Merge into cached last_result so /last also has the data
         if _last_result and _last_result.get("stocks"):
             for stock in _last_result["stocks"]:
@@ -578,9 +584,9 @@ async def _fetch_and_push_events(symbols: list[str]) -> None:
                     stock.update(sym_events)
             await _persist_last(_last_result)
         await _broadcast({"type": "events_update", "data": events_data})
-        logger.info("Background events push: %d symbols", len(events_data))
+        logger.info("Background aux push: %d symbols", len(events_data))
     except Exception as exc:
-        logger.warning("Background events fetch failed: %s", exc)
+        logger.warning("Background aux fetch failed: %s", exc)
 
 
 @router.get("/last", response_model=RefreshResponse)

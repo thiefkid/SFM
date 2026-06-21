@@ -40,6 +40,7 @@ export interface StockResult {
   next_earnings_date: string | null;   // ISO date of next results announcement
   next_dividend_date: string | null;   // ISO date of next dividend payment
   ex_dividend_date: string | null;     // ISO ex-dividend date
+  market_cap: number | null;           // market capitalisation in USD
 }
 
 export interface NasdaqResult {
