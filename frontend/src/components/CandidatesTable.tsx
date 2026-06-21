@@ -77,6 +77,11 @@ function i3Formula(s: StockResult): string | null {
   return `(${s.rt_price.toFixed(2)} − ${s.open_price.toFixed(2)}) / (${s.today_high.toFixed(2)} − ${s.open_price.toFixed(2)})`;
 }
 
+function i4Formula(s: StockResult): string | null {
+  if (s.prev_close <= 0) return null;
+  return `(${s.open_price.toFixed(2)} − ${s.prev_close.toFixed(2)}) / ${s.prev_close.toFixed(2)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Tappable indicator cells (tap value → shows formula)
 // ---------------------------------------------------------------------------
@@ -173,7 +178,7 @@ function fmtTooltipDate(isoDate: string | null): string {
   });
 }
 
-function I4Cell({
+function I5Cell({
   today_value,
   past_values,
   avg,
@@ -181,7 +186,7 @@ function I4Cell({
   day_count,
   dates,
   today_date,
-}: StockResult["i4"]) {
+}: StockResult["i5"]) {
   const allValues = [...past_values, today_value];
   const maxVal = Math.max(...allValues, 1);
   const [activeBar, setActiveBar] = useState<number | null>(null);
@@ -309,14 +314,14 @@ function fmtDateShort(isoDate: string | null): string {
   });
 }
 
-function I5Cell({
+function I6Cell({
   is_ath,
   ath_price,
   ath_date,
   days_since_ath,
   year_high,
   year_high_date,
-}: StockResult["i5"]) {
+}: StockResult["i6"]) {
   return (
     <div className="flex gap-4 text-sm">
       {/* ATH */}
@@ -425,44 +430,6 @@ function EventLabel({ tag, iso }: { tag: string; iso: string | null }) {
         </span>
       ) : (
         <span style={{ color: "var(--muted)", fontSize: 13 }}>—</span>
-      )}
-    </div>
-  );
-}
-
-function GapUpRow({
-  value,
-  open,
-  prevClose,
-}: {
-  value: number | null;
-  open: number;
-  prevClose: number;
-}) {
-  const [showFormula, setShowFormula] = useState(false);
-  return (
-    <div
-      className="mt-2 pt-2 flex items-baseline gap-2"
-      style={{ borderTop: "1px solid var(--border)" }}
-    >
-      <span
-        className="uppercase tracking-wider shrink-0"
-        style={{ color: "var(--muted)", fontSize: 12 }}
-      >
-        Gap
-      </span>
-      <span
-        className="tabular-nums font-medium cursor-pointer"
-        style={{ color: pctColor(value), fontSize: 13 }}
-        onClick={() => setShowFormula((f) => !f)}
-        title="Tap to show formula"
-      >
-        {value !== null ? fmtPct(value) : "—"}
-      </span>
-      {showFormula && value !== null && (
-        <span className="text-xs tabular-nums" style={{ color: "var(--muted)" }}>
-          ({fmtPrice(open)} − {fmtPrice(prevClose)}) / {fmtPrice(prevClose)}
-        </span>
       )}
     </div>
   );
@@ -784,15 +751,19 @@ function StockCard({ stock }: { stock: StockResult }) {
         </CardStat>
       </div>
 
-      {/* I4 */}
-      <CardStat label="I4 · Volume (15d)">
-        <I4Cell {...stock.i4} />
+      {/* I4 — gap */}
+      <CardStat label="I4 · Gap Up">
+        <TappablePct value={stock.i4} formula={i4Formula(stock)} />
       </CardStat>
 
-      {/* I5 + gap up + earnings countdown */}
-      <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+      {/* I5 */}
+      <CardStat label="I5 · Volume (15d)">
         <I5Cell {...stock.i5} />
-        <GapUpRow value={stock.gap_up_pct} open={stock.open_price} prevClose={stock.prev_close} />
+      </CardStat>
+
+      {/* I6 + earnings countdown */}
+      <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+        <I6Cell {...stock.i6} />
         <EventsRow
           earningsDate={stock.next_earnings_date}
           dividendDate={stock.next_dividend_date}
@@ -806,7 +777,7 @@ function StockCard({ stock }: { stock: StockResult }) {
   );
 }
 
-function I6Footer({ stock }: { stock: StockResult }) {
+function I7Footer({ stock }: { stock: StockResult }) {
   return (
     <div
       className="rounded-lg px-4 py-3 flex flex-wrap gap-x-6 gap-y-1"
@@ -817,21 +788,21 @@ function I6Footer({ stock }: { stock: StockResult }) {
       }}
     >
       <span style={{ color: "var(--muted)" }}>
-        I6 — NASDAQ from open:{" "}
+        I7 — NASDAQ from open:{" "}
         <span
           className="tabular-nums font-semibold"
-          style={{ color: pctColor(stock.i6.nasdaq_from_open_pct) }}
+          style={{ color: pctColor(stock.i7.nasdaq_from_open_pct) }}
         >
-          {fmtPct(stock.i6.nasdaq_from_open_pct)}
+          {fmtPct(stock.i7.nasdaq_from_open_pct)}
         </span>
       </span>
       <span style={{ color: "var(--muted)" }}>
         from prev close:{" "}
         <span
           className="tabular-nums font-semibold"
-          style={{ color: pctColor(stock.i6.nasdaq_from_prev_close_pct) }}
+          style={{ color: pctColor(stock.i7.nasdaq_from_prev_close_pct) }}
         >
-          {fmtPct(stock.i6.nasdaq_from_prev_close_pct)}
+          {fmtPct(stock.i7.nasdaq_from_prev_close_pct)}
         </span>
       </span>
     </div>
@@ -882,8 +853,9 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
               <TH style={{ minWidth: 150 }}>I1 — Close vs Open</TH>
               <TH style={{ minWidth: 160 }}>I2 — Close vs Prev</TH>
               <TH style={{ minWidth: 160 }}>I3 — Close in Candle</TH>
-              <TH style={{ minWidth: 220 }}>I4 — Volume (15d)</TH>
-              <TH style={{ minWidth: 190 }}>I5 — ATH / 52W</TH>
+              <TH style={{ minWidth: 90 }}>I4 — Gap</TH>
+              <TH style={{ minWidth: 220 }}>I5 — Volume (15d)</TH>
+              <TH style={{ minWidth: 190 }}>I6 — ATH / 52W</TH>
             </tr>
           </thead>
           <tbody>
@@ -978,15 +950,19 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
                   />
                 </TD>
 
-                {/* I4 */}
+                {/* I4 — gap */}
                 <TD>
-                  <I4Cell {...stock.i4} />
+                  <TappablePct value={stock.i4} formula={i4Formula(stock)} />
                 </TD>
 
-                {/* I5 + gap up + earnings countdown + news */}
+                {/* I5 */}
                 <TD>
                   <I5Cell {...stock.i5} />
-                  <GapUpRow value={stock.gap_up_pct} open={stock.open_price} prevClose={stock.prev_close} />
+                </TD>
+
+                {/* I6 + earnings countdown + news */}
+                <TD>
+                  <I6Cell {...stock.i6} />
                   <EventsRow
                     earningsDate={stock.next_earnings_date}
                     dividendDate={stock.next_dividend_date}
@@ -1000,8 +976,8 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
         </table>
       </div>
 
-      {/* I6 footer */}
-      <I6Footer stock={stocks[0]} />
+      {/* I7 footer */}
+      <I7Footer stock={stocks[0]} />
     </div>
   );
 }

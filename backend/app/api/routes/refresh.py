@@ -55,7 +55,7 @@ _sse_state: dict[str, Any] = {"type": "idle"}
 # Response models
 # ---------------------------------------------------------------------------
 
-class I4Model(BaseModel):
+class I5Model(BaseModel):
     today_value: float
     past_values: list[float]    # up to 15 days, oldest → newest
     avg: float
@@ -65,7 +65,7 @@ class I4Model(BaseModel):
     today_date: str | None      # ISO date of today's (live) bar
 
 
-class I5Model(BaseModel):
+class I6Model(BaseModel):
     is_ath: bool
     ath_price: float | None
     ath_date: str | None
@@ -74,7 +74,7 @@ class I5Model(BaseModel):
     year_high_date: str | None  # date of 52-week high
 
 
-class I6Model(BaseModel):
+class I7Model(BaseModel):
     nasdaq_from_open_pct: float
     nasdaq_from_prev_close_pct: float
 
@@ -91,10 +91,10 @@ class StockResult(BaseModel):
     i1: float | None
     i2: float | None
     i3: float | None
-    gap_up_pct: float | None
-    i4: I4Model
+    i4: float | None            # gap up %
     i5: I5Model
     i6: I6Model
+    i7: I7Model
     next_earnings_date: str | None = None   # ISO date of next results announcement
     next_dividend_date: str | None = None   # ISO date of next dividend payment
     ex_dividend_date: str | None = None     # ISO ex-dividend date
@@ -142,9 +142,9 @@ def _build_stock_result(
     next_dividend: date | None = None,
     ex_dividend: date | None = None,
 ) -> StockResult:
-    i4 = indicators.i4
     i5 = indicators.i5
     i6 = indicators.i6
+    i7 = indicators.i7
     return StockResult(
         rank=rank,
         symbol=indicators.symbol,
@@ -157,30 +157,27 @@ def _build_stock_result(
         i1=indicators.i1,
         i2=indicators.i2,
         i3=indicators.i3,
-        gap_up_pct=(
-            (indicators.open_price - indicators.prev_close) / indicators.prev_close
-            if indicators.prev_close > 0 else None
-        ),
-        i4=I4Model(
-            today_value=i4.today_value,
-            past_values=i4.past_values,
-            avg=i4.avg,
-            ratio=i4.ratio,
-            day_count=i4.day_count,
-            dates=i4.dates,
-            today_date=i4.today_date,
-        ),
+        i4=indicators.i4,
         i5=I5Model(
-            is_ath=i5.is_ath,
-            ath_price=i5.ath_price,
-            ath_date=_fmt_date(i5.ath_date),
-            days_since_ath=i5.days_since_ath,
-            year_high=i5.year_high,
-            year_high_date=_fmt_date(i5.year_high_date),
+            today_value=i5.today_value,
+            past_values=i5.past_values,
+            avg=i5.avg,
+            ratio=i5.ratio,
+            day_count=i5.day_count,
+            dates=i5.dates,
+            today_date=i5.today_date,
         ),
         i6=I6Model(
-            nasdaq_from_open_pct=i6.nasdaq_from_open_pct,
-            nasdaq_from_prev_close_pct=i6.nasdaq_from_prev_close_pct,
+            is_ath=i6.is_ath,
+            ath_price=i6.ath_price,
+            ath_date=_fmt_date(i6.ath_date),
+            days_since_ath=i6.days_since_ath,
+            year_high=i6.year_high,
+            year_high_date=_fmt_date(i6.year_high_date),
+        ),
+        i7=I7Model(
+            nasdaq_from_open_pct=i7.nasdaq_from_open_pct,
+            nasdaq_from_prev_close_pct=i7.nasdaq_from_prev_close_pct,
         ),
         next_earnings_date=_fmt_date(next_earnings),
         next_dividend_date=_fmt_date(next_dividend),
@@ -371,7 +368,7 @@ async def _get_nasdaq() -> NasdaqSnapshot:
     return await quote_service.get_nasdaq_snapshot()
 
 
-def _i4_from_polygon(
+def _i5_from_polygon(
     polygon: dict[date, float],
     today: date,
     db_history: PastValuesResult,
@@ -391,11 +388,11 @@ def _i4_from_polygon(
         history = PastValuesResult(values=values, avg=avg, count=len(values), dates=last)
         today_value = polygon.get(today, snapshot.today_value)
         today_source = "polygon" if today in polygon else "snapshot(close×vol)"
-        logger.info("I4 %s: SOURCE=POLYGON (%d days), today=%.0f via %s, sample_last=%.0f",
+        logger.info("I5 %s: SOURCE=POLYGON (%d days), today=%.0f via %s, sample_last=%.0f",
                      snapshot.symbol, len(last), today_value, today_source,
                      values[-1] if values else 0)
         return history, today_value
-    logger.warning("I4 %s: SOURCE=DB_FALLBACK (only %d polygon days, need >=3), today=%.0f",
+    logger.warning("I5 %s: SOURCE=DB_FALLBACK (only %d polygon days, need >=3), today=%.0f",
                    snapshot.symbol, len(completed), snapshot.today_value)
     return db_history, snapshot.today_value
 
@@ -419,8 +416,8 @@ async def _process_symbol(
             get_ath_status(symbol, snapshot.today_high, now_et),
             get_year_high(symbol, snapshot.today_high, now_et),
         )
-        # Upgrade I4 to Polygon's authoritative turnover (v × vw from tape).
-        history, today_value = _i4_from_polygon(
+        # Upgrade I5 to Polygon's authoritative turnover (v × vw from tape).
+        history, today_value = _i5_from_polygon(
             polygon_turnover or {}, now_et.date(), history, snapshot
         )
         snapshot = replace(snapshot, today_value=today_value)

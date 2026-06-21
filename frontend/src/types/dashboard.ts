@@ -1,4 +1,4 @@
-export interface I4 {
+export interface I5 {
   today_value: number;
   past_values: number[];      // up to 15 days, oldest → newest
   avg: number;
@@ -8,7 +8,7 @@ export interface I4 {
   today_date: string | null;  // ISO date of today's (live) bar
 }
 
-export interface I5 {
+export interface I6 {
   is_ath: boolean;
   ath_price: number | null;
   ath_date: string | null;
@@ -17,7 +17,7 @@ export interface I5 {
   year_high_date: string | null;  // date of 52-week high
 }
 
-export interface I6 {
+export interface I7 {
   nasdaq_from_open_pct: number;
   nasdaq_from_prev_close_pct: number;
 }
@@ -34,10 +34,10 @@ export interface StockResult {
   i1: number | null;
   i2: number | null;
   i3: number | null;
-  gap_up_pct: number | null;
-  i4: I4;
+  i4: number | null;              // gap up %
   i5: I5;
   i6: I6;
+  i7: I7;
   next_earnings_date: string | null;   // ISO date of next results announcement
   next_dividend_date: string | null;   // ISO date of next dividend payment
   ex_dividend_date: string | null;     // ISO ex-dividend date

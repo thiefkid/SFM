@@ -4,9 +4,10 @@ Indicator computation engine.
 I1: (RT price - open) / open
 I2: (RT price - prev close) / prev close
 I3: (RT price - open) / (today high - open)   → None if high == open
-I4: today trading value vs past 5 days
-I5: all-time high status
-I6: NASDAQ % change from open; NASDAQ % change from prev close
+I4: (open - prev close) / prev close           → gap up %
+I5: today trading value vs past 15 days
+I6: all-time high status + 52-week high
+I7: NASDAQ % change from open; NASDAQ % change from prev close
 """
 
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ from app.services.historical import ATHResult, PastValuesResult, YearHighResult
 # ---------------------------------------------------------------------------
 
 @dataclass
-class I4Result:
+class I5Result:
     today_value: float
     past_values: list[float]    # up to 15 days, oldest → newest (for bar chart)
     avg: float
@@ -32,7 +33,7 @@ class I4Result:
 
 
 @dataclass
-class I5Result:
+class I6Result:
     is_ath: bool
     ath_price: float | None
     ath_date: date | None
@@ -42,7 +43,7 @@ class I5Result:
 
 
 @dataclass
-class I6Result:
+class I7Result:
     nasdaq_from_open_pct: float
     nasdaq_from_prev_close_pct: float
 
@@ -63,9 +64,10 @@ class StockIndicators:
     i1: float | None            # intraday gain from open
     i2: float | None            # day change from yesterday
     i3: float | None            # position in day's range (None if no range yet)
-    i4: I4Result
+    i4: float | None            # gap up % (open vs prev close)
     i5: I5Result
     i6: I6Result
+    i7: I7Result
 
 
 # ---------------------------------------------------------------------------
@@ -105,14 +107,21 @@ def compute_i3(rt_price: float, open_price: float, today_high: float) -> float |
     return (rt_price - open_price) / denominator
 
 
-def compute_i4(
+def compute_i4(open_price: float, prev_close: float) -> float | None:
+    """(open - prev close) / prev close → gap up %."""
+    if prev_close <= 0:
+        return None
+    return (open_price - prev_close) / prev_close
+
+
+def compute_i5(
     today_value: float,
     history: PastValuesResult,
     today_date: str | None = None,
-) -> I4Result:
+) -> I5Result:
     """Today's trading value vs past 15 days (for bar chart)."""
     ratio = (today_value / history.avg) if history.avg > 0 else None
-    return I4Result(
+    return I5Result(
         today_value=today_value,
         past_values=history.values,
         avg=history.avg,
@@ -123,10 +132,10 @@ def compute_i4(
     )
 
 
-def compute_i5(
+def compute_i6(
     ath: ATHResult | None,
     year_high: YearHighResult | None,
-) -> I5Result:
+) -> I6Result:
     """All-time high status + 52-week high.
 
     ATH status is resolved upstream in historical.get_ath_status (reference-day
@@ -136,12 +145,12 @@ def compute_i5(
     year_high_date = year_high.high_date if year_high else None
 
     if ath is None:
-        return I5Result(
+        return I6Result(
             is_ath=False, ath_price=None, ath_date=None, days_since_ath=None,
             year_high=year_high_price, year_high_date=year_high_date,
         )
 
-    return I5Result(
+    return I6Result(
         is_ath=ath.is_ath,
         ath_price=ath.ath_price,
         ath_date=ath.ath_date,
@@ -151,7 +160,7 @@ def compute_i5(
     )
 
 
-def compute_i6(nasdaq: NasdaqSnapshot) -> I6Result:
+def compute_i7(nasdaq: NasdaqSnapshot) -> I7Result:
     """NASDAQ % change from open and from prev close."""
     from_open = (
         (nasdaq.rt_level - nasdaq.open_level) / nasdaq.open_level
@@ -161,7 +170,7 @@ def compute_i6(nasdaq: NasdaqSnapshot) -> I6Result:
         (nasdaq.rt_level - nasdaq.prev_close) / nasdaq.prev_close
         if nasdaq.prev_close > 0 else 0.0
     )
-    return I6Result(
+    return I7Result(
         nasdaq_from_open_pct=from_open,
         nasdaq_from_prev_close_pct=from_prev_close,
     )
@@ -175,7 +184,7 @@ def compute_all(
     nasdaq: NasdaqSnapshot,
     today_date: str | None = None,
 ) -> StockIndicators:
-    """Compute all 6 indicators for a single stock."""
+    """Compute all 7 indicators for a single stock."""
     return StockIndicators(
         symbol=snapshot.symbol,
         rt_price=snapshot.rt_price,
@@ -187,7 +196,8 @@ def compute_all(
         i1=compute_i1(snapshot.rt_price, snapshot.open_price),
         i2=compute_i2(snapshot.rt_price, snapshot.prev_close),
         i3=compute_i3(snapshot.rt_price, snapshot.open_price, snapshot.today_high),
-        i4=compute_i4(snapshot.today_value, history, today_date),
-        i5=compute_i5(ath, year_high),
-        i6=compute_i6(nasdaq),
+        i4=compute_i4(snapshot.open_price, snapshot.prev_close),
+        i5=compute_i5(snapshot.today_value, history, today_date),
+        i6=compute_i6(ath, year_high),
+        i7=compute_i7(nasdaq),
     )

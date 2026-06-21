@@ -197,14 +197,14 @@ class TestRateLimitRetry:
 
 
 # ---------------------------------------------------------------------------
-# Integration: _i4_from_polygon (from refresh.py)
+# Integration: _i5_from_polygon (from refresh.py)
 # ---------------------------------------------------------------------------
 
-class TestI4FromPolygon:
+class TestI5FromPolygon:
     def test_polygon_overrides_db_history(self):
         from app.services.historical import PastValuesResult
         from app.services.futu_scraper import StockSnapshot
-        from app.api.routes.refresh import _i4_from_polygon
+        from app.api.routes.refresh import _i5_from_polygon
 
         db_history = PastValuesResult(
             values=[100.0] * 5,
@@ -226,7 +226,7 @@ class TestI4FromPolygon:
         }
         today = date(2024, 6, 17)
 
-        history, today_val = _i4_from_polygon(polygon_data, today, db_history, snapshot)
+        history, today_val = _i5_from_polygon(polygon_data, today, db_history, snapshot)
 
         assert len(history.values) == 5
         assert history.values[0] == pytest.approx(200_000_000.0)
@@ -238,7 +238,7 @@ class TestI4FromPolygon:
     def test_polygon_today_used_when_available(self):
         from app.services.historical import PastValuesResult
         from app.services.futu_scraper import StockSnapshot
-        from app.api.routes.refresh import _i4_from_polygon
+        from app.api.routes.refresh import _i5_from_polygon
 
         db_history = PastValuesResult(values=[], avg=0.0, count=0, dates=[])
         snapshot = StockSnapshot(
@@ -254,7 +254,7 @@ class TestI4FromPolygon:
             today: 300_000_000.0,
         }
 
-        history, today_val = _i4_from_polygon(polygon_data, today, db_history, snapshot)
+        history, today_val = _i5_from_polygon(polygon_data, today, db_history, snapshot)
 
         assert len(history.values) == 3
         assert today_val == pytest.approx(300_000_000.0)
@@ -262,7 +262,7 @@ class TestI4FromPolygon:
     def test_insufficient_polygon_data_falls_back_to_db(self):
         from app.services.historical import PastValuesResult
         from app.services.futu_scraper import StockSnapshot
-        from app.api.routes.refresh import _i4_from_polygon
+        from app.api.routes.refresh import _i5_from_polygon
 
         db_history = PastValuesResult(
             values=[100.0, 200.0, 300.0],
@@ -282,7 +282,7 @@ class TestI4FromPolygon:
         }
         today = date(2024, 6, 17)
 
-        history, today_val = _i4_from_polygon(polygon_data, today, db_history, snapshot)
+        history, today_val = _i5_from_polygon(polygon_data, today, db_history, snapshot)
 
         # Should fall back to DB
         assert history is db_history
