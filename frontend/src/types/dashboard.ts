@@ -34,6 +34,7 @@ export interface StockResult {
   i1: number | null;
   i2: number | null;
   i3: number | null;
+  gap_up_pct: number | null;
   i4: I4;
   i5: I5;
   i6: I6;

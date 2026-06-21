@@ -91,6 +91,7 @@ class StockResult(BaseModel):
     i1: float | None
     i2: float | None
     i3: float | None
+    gap_up_pct: float | None
     i4: I4Model
     i5: I5Model
     i6: I6Model
@@ -156,6 +157,10 @@ def _build_stock_result(
         i1=indicators.i1,
         i2=indicators.i2,
         i3=indicators.i3,
+        gap_up_pct=(
+            (indicators.open_price - indicators.prev_close) / indicators.prev_close
+            if indicators.prev_close > 0 else None
+        ),
         i4=I4Model(
             today_value=i4.today_value,
             past_values=i4.past_values,

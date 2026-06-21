@@ -430,6 +430,44 @@ function EventLabel({ tag, iso }: { tag: string; iso: string | null }) {
   );
 }
 
+function GapUpRow({
+  value,
+  open,
+  prevClose,
+}: {
+  value: number | null;
+  open: number;
+  prevClose: number;
+}) {
+  const [showFormula, setShowFormula] = useState(false);
+  return (
+    <div
+      className="mt-2 pt-2 flex items-baseline gap-2"
+      style={{ borderTop: "1px solid var(--border)" }}
+    >
+      <span
+        className="uppercase tracking-wider shrink-0"
+        style={{ color: "var(--muted)", fontSize: 12 }}
+      >
+        Gap
+      </span>
+      <span
+        className="tabular-nums font-medium cursor-pointer"
+        style={{ color: pctColor(value), fontSize: 13 }}
+        onClick={() => setShowFormula((f) => !f)}
+        title="Tap to show formula"
+      >
+        {value !== null ? fmtPct(value) : "—"}
+      </span>
+      {showFormula && value !== null && (
+        <span className="text-xs tabular-nums" style={{ color: "var(--muted)" }}>
+          ({fmtPrice(open)} − {fmtPrice(prevClose)}) / {fmtPrice(prevClose)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function EventsRow({
   earningsDate,
   dividendDate,
@@ -751,9 +789,10 @@ function StockCard({ stock }: { stock: StockResult }) {
         <I4Cell {...stock.i4} />
       </CardStat>
 
-      {/* I5 + earnings countdown */}
+      {/* I5 + gap up + earnings countdown */}
       <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
         <I5Cell {...stock.i5} />
+        <GapUpRow value={stock.gap_up_pct} open={stock.open_price} prevClose={stock.prev_close} />
         <EventsRow
           earningsDate={stock.next_earnings_date}
           dividendDate={stock.next_dividend_date}
@@ -944,9 +983,10 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
                   <I4Cell {...stock.i4} />
                 </TD>
 
-                {/* I5 + earnings countdown + news */}
+                {/* I5 + gap up + earnings countdown + news */}
                 <TD>
                   <I5Cell {...stock.i5} />
+                  <GapUpRow value={stock.gap_up_pct} open={stock.open_price} prevClose={stock.prev_close} />
                   <EventsRow
                     earningsDate={stock.next_earnings_date}
                     dividendDate={stock.next_dividend_date}
