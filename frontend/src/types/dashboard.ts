@@ -69,6 +69,7 @@ export interface BackendVersion {
 export interface DashboardData {
   refreshed_at: string;       // ISO 8601 — backend time of this refresh round
   server_time?: string;       // ISO 8601 — backend clock when response was built
+  refresh_duration_s?: number | null;
   backend_version?: BackendVersion;
   market_session: MarketSession;
   nasdaq: NasdaqResult;

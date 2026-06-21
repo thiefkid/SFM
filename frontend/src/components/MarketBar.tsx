@@ -1,18 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import type { MarketSession, NasdaqResult } from "@/types/dashboard";
-
-function relativeAgo(ms: number): string {
-  if (ms < 0) ms = 0;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
 
 function Pct({ value, label }: { value: number; label: string }) {
   const sign = value >= 0 ? "+" : "";
@@ -43,31 +31,12 @@ function sessionDot(session: MarketSession["session"]): { color: string; pulse: 
 interface Props {
   nasdaq: NasdaqResult;
   refreshedAt: string | null;
-  serverTime?: string | null;
   refreshing?: boolean;
   marketSession?: MarketSession | null;
+  refreshDuration?: number | null;
 }
 
-export default function MarketBar({ nasdaq, refreshedAt, serverTime, refreshing = false, marketSession }: Props) {
-  // Tick every second so the "ago" stays live.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Anchor "ago" on the backend clock: skew = how far the client clock leads the
-  // backend's reported server_time. backendNow ≈ Date.now() - skew. This keeps the
-  // freshness reading correct even if the user's device clock is wrong.
-  const skewRef = useRef(0);
-  useEffect(() => {
-    if (serverTime) {
-      const st = new Date(serverTime).getTime();
-      if (!isNaN(st)) skewRef.current = Date.now() - st;
-    }
-  }, [serverTime]);
-
-  const refreshedMs = refreshedAt ? new Date(refreshedAt).getTime() : NaN;
+export default function MarketBar({ nasdaq, refreshedAt, refreshing = false, marketSession, refreshDuration }: Props) {
   const time = refreshedAt
     ? new Date(refreshedAt).toLocaleString("en-US", {
         timeZone: "America/New_York",
@@ -78,7 +47,6 @@ export default function MarketBar({ nasdaq, refreshedAt, serverTime, refreshing 
         second: "2-digit",
       })
     : null;
-  const ago = !isNaN(refreshedMs) ? relativeAgo(now - skewRef.current - refreshedMs) : null;
 
   return (
     <div
@@ -145,7 +113,9 @@ export default function MarketBar({ nasdaq, refreshedAt, serverTime, refreshing 
       {time && (
         <span className="text-sm" style={{ color: "var(--muted)" }}>
           Refreshed <span style={{ color: "var(--text)" }}>{time} ET</span>
-          {ago && <span className="ml-1.5" style={{ color: "var(--muted)" }}>· {ago}</span>}
+          {refreshDuration != null && (
+            <span className="ml-1.5" style={{ color: "var(--muted)" }}>· took {refreshDuration}s</span>
+          )}
         </span>
       )}
     </div>

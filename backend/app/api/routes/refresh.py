@@ -8,6 +8,7 @@
 import asyncio
 import json
 import logging
+import time
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -126,6 +127,7 @@ class BackendVersion(BaseModel):
 class RefreshResponse(BaseModel):
     refreshed_at: str           # ISO 8601 with timezone — backend time of this refresh round
     server_time: str            # ISO 8601 — backend clock when this response was built
+    refresh_duration_s: float | None = None
     backend_version: BackendVersion
     market_session: MarketSessionModel
     nasdaq: NasdaqResult
@@ -477,6 +479,7 @@ async def refresh() -> RefreshResponse:
 
 async def _do_refresh() -> RefreshResponse:
     global _last_result
+    t0 = time.monotonic()
 
     # Step 1: get candidates (Futu scrape — Playwright browser starts here)
     symbols = await scraper.get_top_active_symbols()
@@ -553,10 +556,12 @@ async def _do_refresh() -> RefreshResponse:
         for i, ind in enumerate(all_indicators)
     ]
 
+    duration_s = round(time.monotonic() - t0, 2)
     now_utc = datetime.now(tz=timezone.utc).isoformat()
     response = RefreshResponse(
         refreshed_at=now_utc,
         server_time=now_utc,
+        refresh_duration_s=duration_s,
         backend_version=_backend_version(),
         market_session=MarketSessionModel(**session_info),
         nasdaq=nasdaq_result,

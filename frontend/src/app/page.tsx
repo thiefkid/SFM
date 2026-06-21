@@ -127,9 +127,9 @@ export default function DashboardPage() {
       <MarketBar
         nasdaq={data?.nasdaq ?? emptyNasdaq}
         refreshedAt={data?.refreshed_at ?? null}
-        serverTime={data?.server_time ?? null}
         refreshing={refreshing}
         marketSession={data?.market_session ?? null}
+        refreshDuration={data?.refresh_duration_s ?? null}
       />
 
       {/* Main content */}
