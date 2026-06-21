@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CandidatesTable from "@/components/CandidatesTable";
 import MarketBar from "@/components/MarketBar";
 import RefreshButton from "@/components/RefreshButton";
-import { fetchLast, fetchRefresh, REFRESH_IN_PROGRESS } from "@/lib/api";
+import { fetchLast, fetchRefresh, migrateDashboard, REFRESH_IN_PROGRESS } from "@/lib/api";
 import type { DashboardData } from "@/types/dashboard";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -54,7 +54,7 @@ export default function DashboardPage() {
 
     es.addEventListener("refresh_done", (e: MessageEvent) => {
       try {
-        const parsed = JSON.parse(e.data) as DashboardData;
+        const parsed = migrateDashboard(JSON.parse(e.data) as DashboardData);
         if (parsed.stocks) setData(parsed);
       } catch { /* ignore parse errors */ }
       setRefreshing(false);
