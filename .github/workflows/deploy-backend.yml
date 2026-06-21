@@ -47,7 +47,11 @@ jobs:
       - name: Build and push image
         run: |
           IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
-          docker build -t "$IMAGE" ./backend
+          COMMIT_TIME="$(git show -s --format=%cI ${{ github.sha }})"
+          docker build \
+            --build-arg GIT_COMMIT=${{ github.sha }} \
+            --build-arg GIT_COMMIT_TIME="$COMMIT_TIME" \
+            -t "$IMAGE" ./backend
           docker push "$IMAGE"
 
       - name: Deploy to Cloud Run

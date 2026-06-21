@@ -61,8 +61,15 @@ export interface MarketSession {
   next_open: string | null;
 }
 
+export interface BackendVersion {
+  commit: string;
+  commit_time: string | null;
+}
+
 export interface DashboardData {
-  refreshed_at: string;       // ISO 8601
+  refreshed_at: string;       // ISO 8601 — backend time of this refresh round
+  server_time?: string;       // ISO 8601 — backend clock when response was built
+  backend_version?: BackendVersion;
   market_session: MarketSession;
   nasdaq: NasdaqResult;
   stocks: StockResult[];

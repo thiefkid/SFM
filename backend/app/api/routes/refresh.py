@@ -118,11 +118,26 @@ class MarketSessionModel(BaseModel):
     next_open: str | None       # ISO date of next trading day (when closed)
 
 
+class BackendVersion(BaseModel):
+    commit: str             # git short SHA (or "dev")
+    commit_time: str | None # ISO 8601 commit timestamp
+
+
 class RefreshResponse(BaseModel):
-    refreshed_at: str           # ISO 8601 with timezone
+    refreshed_at: str           # ISO 8601 with timezone — backend time of this refresh round
+    server_time: str            # ISO 8601 — backend clock when this response was built
+    backend_version: BackendVersion
     market_session: MarketSessionModel
     nasdaq: NasdaqResult
     stocks: list[StockResult]
+
+
+def _backend_version() -> BackendVersion:
+    commit = (settings.git_commit or "dev")[:7]
+    return BackendVersion(
+        commit=commit,
+        commit_time=settings.git_commit_time or None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -538,8 +553,11 @@ async def _do_refresh() -> RefreshResponse:
         for i, ind in enumerate(all_indicators)
     ]
 
+    now_utc = datetime.now(tz=timezone.utc).isoformat()
     response = RefreshResponse(
-        refreshed_at=datetime.now(tz=timezone.utc).isoformat(),
+        refreshed_at=now_utc,
+        server_time=now_utc,
+        backend_version=_backend_version(),
         market_session=MarketSessionModel(**session_info),
         nasdaq=nasdaq_result,
         stocks=stock_results,
@@ -599,6 +617,10 @@ async def get_last() -> RefreshResponse:
         raise HTTPException(status_code=404, detail="No data yet — click Refresh Data")
     # Always compute market_session live (persisted value would be stale)
     last["market_session"] = get_market_session(_now_et())
+    # server_time + backend_version reflect the *running* backend, not the
+    # snapshot that persisted this data (which may predate a redeploy).
+    last["server_time"] = datetime.now(tz=timezone.utc).isoformat()
+    last["backend_version"] = _backend_version().model_dump()
     return RefreshResponse(**last)
 
 

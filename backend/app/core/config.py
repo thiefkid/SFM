@@ -32,5 +32,10 @@ class Settings(BaseSettings):
     nightly_update_hour: int = 18
     nightly_update_minute: int = 0
 
+    # Build/version info — injected at Docker build time from git (see Dockerfile
+    # + deploy-backend.yml). Defaults make local/dev runs report "dev".
+    git_commit: str = "dev"
+    git_commit_time: str = ""
+
 
 settings = Settings()

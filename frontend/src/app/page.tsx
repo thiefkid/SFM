@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import CandidatesTable from "@/components/CandidatesTable";
+import InfoButton from "@/components/InfoButton";
 import MarketBar from "@/components/MarketBar";
 import RefreshButton from "@/components/RefreshButton";
 import { fetchLast, fetchRefresh, migrateDashboard, REFRESH_IN_PROGRESS } from "@/lib/api";
@@ -102,9 +103,12 @@ export default function DashboardPage() {
     <div className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
       {/* Header — centered branding, compact refresh */}
       <header
-        className="flex flex-col items-center px-4 sm:px-6 pt-safe pb-3 sm:pb-4 border-b"
+        className="relative flex flex-col items-center px-4 sm:px-6 pt-safe pb-3 sm:pb-4 border-b"
         style={{ background: "var(--surface)", borderColor: "var(--border)" }}
       >
+        <div className="absolute top-3 right-4 sm:right-6">
+          <InfoButton backend={data?.backend_version} />
+        </div>
         <div className="flex items-center gap-3 w-full justify-center">
           <h1
             className="text-2xl sm:text-3xl font-bold tracking-[0.25em]"
@@ -123,6 +127,7 @@ export default function DashboardPage() {
       <MarketBar
         nasdaq={data?.nasdaq ?? emptyNasdaq}
         refreshedAt={data?.refreshed_at ?? null}
+        serverTime={data?.server_time ?? null}
         refreshing={refreshing}
         marketSession={data?.market_session ?? null}
       />
