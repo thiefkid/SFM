@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { StockResult } from "@/types/dashboard";
-import { fetchNews, type NewsArticle } from "@/lib/api";
+import { fetchNews, fetchBars, type NewsArticle, type IntradayBar } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -61,11 +61,6 @@ function i3BarColor(value: number): string {
 // ---------------------------------------------------------------------------
 // Formula builders (tap-to-reveal)
 // ---------------------------------------------------------------------------
-
-function i1Formula(s: StockResult): string | null {
-  if (s.open_price <= 0) return null;
-  return `(${s.rt_price.toFixed(2)} − ${s.open_price.toFixed(2)}) / ${s.open_price.toFixed(2)}`;
-}
 
 function i2Formula(s: StockResult): string | null {
   if (s.prev_close <= 0) return null;
@@ -160,6 +155,211 @@ function TappableI3({
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// I1 intraday chart (tap I1 → today's price path vs open, touch to scrub)
+// ---------------------------------------------------------------------------
+
+function fmtBarTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function IntradayChartModal({
+  symbol,
+  open,
+  onClose,
+}: {
+  symbol: string;
+  open: number;
+  onClose: () => void;
+}) {
+  const [bars, setBars] = useState<IntradayBar[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [scrub, setScrub] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchBars(symbol)
+      .then((b) => { if (!cancelled) setBars(b); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [symbol]);
+
+  // Geometry (viewBox units; responsive via width:100%).
+  const W = 340, H = 170;
+  const PAD = { l: 8, r: 8, t: 10, b: 10 };
+  const innerW = W - PAD.l - PAD.r;
+  const innerH = H - PAD.t - PAD.b;
+
+  const n = bars.length;
+  const canDraw = n >= 2 && open > 0;
+
+  // % change from open per bar.
+  const pct = canDraw ? bars.map((b) => (b.close - open) / open) : [];
+  // Y-range always includes the 0% baseline, padded 8% for headroom.
+  let minP = 0, maxP = 0;
+  if (canDraw) {
+    minP = Math.min(0, ...pct);
+    maxP = Math.max(0, ...pct);
+    const span = maxP - minP || 0.0001;
+    minP -= span * 0.08;
+    maxP += span * 0.08;
+  }
+  const range = maxP - minP || 1;
+
+  const xAt = (i: number) => PAD.l + (n <= 1 ? 0 : (i / (n - 1)) * innerW);
+  const yAt = (p: number) => PAD.t + (1 - (p - minP) / range) * innerH;
+
+  const path = canDraw
+    ? pct.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(2)} ${yAt(p).toFixed(2)}`).join(" ")
+    : "";
+
+  const lastPct = canDraw ? pct[n - 1] : null;
+  const lineColor = lastPct != null && lastPct < 0 ? "var(--red)" : "var(--green)";
+  const baselineY = canDraw ? yAt(0) : 0;
+
+  const activeIdx = scrub != null ? scrub : (canDraw ? n - 1 : null);
+  const activeBar = activeIdx != null ? bars[activeIdx] : null;
+  const activePct = activeIdx != null ? pct[activeIdx] : null;
+
+  const handleMove = useCallback((clientX: number) => {
+    const el = svgRef.current;
+    if (!el || n < 2) return;
+    const rect = el.getBoundingClientRect();
+    const frac = (clientX - rect.left) / rect.width;
+    const idx = Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
+    setScrub(idx);
+  }, [n]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.7)" }}
+      onClick={onClose}
+    >
+      <div
+        className="rounded-lg w-full max-w-lg p-5 relative"
+        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full"
+          style={{ background: "var(--bg)", color: "var(--muted)" }}
+          onClick={onClose}
+        >
+          ✕
+        </button>
+
+        <h2 className="text-base font-semibold pr-8" style={{ color: "var(--text-bright)" }}>
+          {symbol} <span style={{ color: "var(--muted)", fontWeight: 400 }}>· intraday vs open</span>
+        </h2>
+
+        {/* Readout — defaults to latest bar, follows the scrubber on touch */}
+        <div className="mt-2 flex items-baseline gap-3 tabular-nums" style={{ minHeight: 24 }}>
+          {activeBar && activePct != null ? (
+            <>
+              <span className="text-sm" style={{ color: "var(--muted)" }}>{fmtBarTime(activeBar.t)}</span>
+              <span className="text-base font-semibold" style={{ color: "var(--text-bright)" }}>
+                {fmtPrice(activeBar.close)}
+              </span>
+              <span className="text-sm font-semibold" style={{ color: activePct < 0 ? "var(--red)" : "var(--green)" }}>
+                {activePct >= 0 ? "+" : ""}{(activePct * 100).toFixed(2)}%
+              </span>
+            </>
+          ) : (
+            <span className="text-sm italic" style={{ color: "var(--muted)" }}>
+              {loading ? "Loading…" : "No intraday data."}
+            </span>
+          )}
+        </div>
+
+        {canDraw && (
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            className="w-full mt-2 select-none touch-none"
+            style={{ height: 180 }}
+            onMouseMove={(e) => handleMove(e.clientX)}
+            onMouseLeave={() => setScrub(null)}
+            onTouchStart={(e) => handleMove(e.touches[0].clientX)}
+            onTouchMove={(e) => handleMove(e.touches[0].clientX)}
+            onTouchEnd={() => setScrub(null)}
+          >
+            {/* open baseline (0%) */}
+            <line
+              x1={PAD.l} y1={baselineY} x2={W - PAD.r} y2={baselineY}
+              stroke="var(--muted)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5}
+            />
+            {/* price path */}
+            <path d={path} fill="none" stroke={lineColor} strokeWidth={1.5}
+              strokeLinejoin="round" strokeLinecap="round" />
+            {/* scrub crosshair */}
+            {activeIdx != null && (
+              <>
+                <line
+                  x1={xAt(activeIdx)} y1={PAD.t} x2={xAt(activeIdx)} y2={H - PAD.b}
+                  stroke="var(--text)" strokeWidth={1} opacity={0.4}
+                />
+                <circle cx={xAt(activeIdx)} cy={yAt(pct[activeIdx])} r={3} fill={lineColor} />
+              </>
+            )}
+          </svg>
+        )}
+
+        <p className="mt-2 text-xs italic" style={{ color: "var(--muted)" }}>
+          1-min bars (delayed) · drag across the chart to read time &amp; price
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function TappableI1({
+  symbol,
+  value,
+  open,
+}: {
+  symbol: string;
+  value: number | null;
+  open: number;
+}) {
+  const [chartOpen, setChartOpen] = useState(false);
+  return (
+    <>
+      <button
+        className="cursor-pointer select-none text-left"
+        onClick={() => setChartOpen(true)}
+      >
+        <span
+          className="tabular-nums font-semibold underline decoration-dotted underline-offset-2"
+          style={{ color: pctColor(value), fontSize: 15 }}
+        >
+          {fmtPct(value)}
+        </span>
+      </button>
+      {chartOpen && (
+        <IntradayChartModal symbol={symbol} open={open} onClose={() => setChartOpen(false)} />
+      )}
+    </>
   );
 }
 
@@ -741,7 +941,7 @@ function StockCard({ stock }: { stock: StockResult }) {
       {/* I1 / I2 / I3 — tap any value to see formula */}
       <div className="grid grid-cols-3 gap-3">
         <CardStat label="I1 · vs Open">
-          <TappablePct value={stock.i1} formula={i1Formula(stock)} />
+          <TappableI1 symbol={stock.symbol} value={stock.i1} open={stock.open_price} />
         </CardStat>
         <CardStat label="I2 · vs Prev">
           <TappablePct value={stock.i2} formula={i2Formula(stock)} />
@@ -926,11 +1126,12 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
                   </span>
                 </TD>
 
-                {/* I1 — tap to see formula */}
+                {/* I1 — tap to open intraday chart */}
                 <TD>
-                  <TappablePct
+                  <TappableI1
+                    symbol={stock.symbol}
                     value={stock.i1}
-                    formula={i1Formula(stock)}
+                    open={stock.open_price}
                   />
                 </TD>
 

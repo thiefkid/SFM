@@ -70,3 +70,15 @@ export async function fetchNews(symbol: string): Promise<NewsArticle[]> {
   const data = await res.json();
   return data.articles ?? [];
 }
+
+export interface IntradayBar {
+  t: string;        // ISO 8601 ET timestamp of the bar
+  close: number;    // close price for that minute
+}
+
+export async function fetchBars(symbol: string): Promise<IntradayBar[]> {
+  const res = await fetch(`${API}/api/v1/bars/${encodeURIComponent(symbol)}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.bars ?? [];
+}

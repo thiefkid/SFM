@@ -717,3 +717,11 @@ async def get_news(symbol: str):
     from app.services import news as news_service
     items = await news_service.get_company_news(symbol.upper(), count=5)
     return {"symbol": symbol.upper(), "articles": items}
+
+
+@router.get("/bars/{symbol}")
+async def get_bars(symbol: str):
+    """On-demand intraday 1-minute price bars for a ticker (yfinance)."""
+    from app.services import bars as bars_service
+    items = await bars_service.get_intraday_bars(symbol.upper())
+    return {"symbol": symbol.upper(), "bars": items}
