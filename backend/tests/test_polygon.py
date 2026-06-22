@@ -18,7 +18,8 @@ import pytest
 
 from app.services import polygon as polygon_mod
 from app.services.polygon import (
-    DailyBar, _fetch_and_cache, _ts_to_date, get_cached_bar, get_daily_turnover,
+    DailyBar, OfficialOHLC, _fetch_and_cache, _ts_to_date, get_cached_bar,
+    get_daily_turnover, get_official_ohlc,
 )
 
 
@@ -193,6 +194,90 @@ class TestRateLimitRetry:
                     result = await polygon_mod._fetch_daily_aggs("AAPL", "2024-06-10", "2024-06-17")
 
         assert len(result) == 1
+        assert mock_client.get.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Unit: get_official_ohlc (/v1/open-close — authoritative regular-session OHLC)
+# ---------------------------------------------------------------------------
+
+class TestGetOfficialOHLC:
+    def setup_method(self):
+        polygon_mod._open_close_cache.clear()
+
+    def _resp(self, status_code, json_body=None):
+        import httpx
+        return httpx.Response(
+            status_code,
+            json=json_body if json_body is not None else {},
+            request=httpx.Request("GET", "https://api.polygon.io/v1/open-close/X/2026-06-19"),
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_api_key_returns_none(self):
+        with patch.object(polygon_mod.settings, "polygon_api_key", ""):
+            assert await get_official_ohlc("SPCX", date(2026, 6, 19)) is None
+
+    @pytest.mark.asyncio
+    async def test_ok_parses_and_caches(self):
+        body = {
+            "status": "OK", "symbol": "SPCX", "from": "2026-06-19",
+            "open": 24.31, "high": 24.90, "low": 24.10, "close": 24.58,
+            "preMarket": 24.20, "afterHours": 24.55, "volume": 12345,
+        }
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=self._resp(200, body))
+
+        with patch.object(polygon_mod, "_http_client", mock_client):
+            with patch.object(polygon_mod.settings, "polygon_api_key", "k"):
+                ohlc = await get_official_ohlc("SPCX", date(2026, 6, 19))
+
+        assert ohlc == OfficialOHLC(date(2026, 6, 19), 24.31, 24.90, 24.10, 24.58)
+        # The official open must be the regular-session open, NOT preMarket.
+        assert ohlc.open == 24.31
+
+        # Second call is served from cache → no further HTTP.
+        with patch.object(polygon_mod, "_http_client", mock_client):
+            with patch.object(polygon_mod.settings, "polygon_api_key", "k"):
+                again = await get_official_ohlc("SPCX", date(2026, 6, 19))
+        assert again == ohlc
+        assert mock_client.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_404_not_settled_returns_none_and_not_cached(self):
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=self._resp(404, {"status": "NOT_FOUND"}))
+
+        with patch.object(polygon_mod, "_http_client", mock_client):
+            with patch.object(polygon_mod.settings, "polygon_api_key", "k"):
+                first = await get_official_ohlc("SPCX", date(2026, 6, 19))
+                second = await get_official_ohlc("SPCX", date(2026, 6, 19))
+
+        assert first is None and second is None
+        # Not cached → retried on the next refresh (2 HTTP calls, not 1).
+        assert mock_client.get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_status_not_ok_returns_none(self):
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=self._resp(200, {"status": "DELAYED"}))
+
+        with patch.object(polygon_mod, "_http_client", mock_client):
+            with patch.object(polygon_mod.settings, "polygon_api_key", "k"):
+                assert await get_official_ohlc("SPCX", date(2026, 6, 19)) is None
+
+    @pytest.mark.asyncio
+    async def test_429_retries_then_succeeds(self):
+        body = {"status": "OK", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5}
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=[self._resp(429), self._resp(200, body)])
+
+        with patch.object(polygon_mod, "_http_client", mock_client):
+            with patch.object(polygon_mod.settings, "polygon_api_key", "k"):
+                with patch("asyncio.sleep", new_callable=AsyncMock):
+                    ohlc = await get_official_ohlc("AAPL", date(2026, 6, 19))
+
+        assert ohlc is not None and ohlc.close == 10.5
         assert mock_client.get.call_count == 2
 
 

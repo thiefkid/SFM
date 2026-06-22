@@ -23,6 +23,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _POLYGON_AGGS = "https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{from_date}/{to_date}"
+_POLYGON_OPEN_CLOSE = "https://api.polygon.io/v1/open-close/{symbol}/{date}"
 
 _http_client = httpx.AsyncClient(timeout=15.0)
 
@@ -46,6 +47,25 @@ class DailyBar:
 
 
 _bar_cache: dict[tuple[str, date], DailyBar] = {}
+
+
+@dataclass
+class OfficialOHLC:
+    """Official regular-session OHLC from Polygon's /v1/open-close endpoint.
+
+    Unlike the /v2/aggs daily bar (whose open/close include pre- and post-market
+    trades), these are the authoritative regular-session opening and closing
+    auction prices — exactly what I1/I2/I3 should reference after the close.
+    """
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+# Settled daily open/close never changes → cache for the whole process lifetime.
+_open_close_cache: dict[tuple[str, date], OfficialOHLC] = {}
 
 
 async def _fetch_daily_aggs(symbol: str, from_date: str, to_date: str) -> list[dict]:
@@ -165,3 +185,73 @@ async def get_daily_turnover(
 def get_cached_bar(symbol: str, bar_date: date) -> DailyBar | None:
     """Return cached Polygon daily bar for a specific symbol/date, or None."""
     return _bar_cache.get((symbol, bar_date))
+
+
+async def get_official_ohlc(symbol: str, day: date) -> OfficialOHLC | None:
+    """Authoritative regular-session OHLC for a settled trading day.
+
+    Uses Polygon's /v1/open-close, whose `open`/`close` are the official
+    opening and closing auction prices (pre-/post-market reported separately,
+    not blended into the open like the daily aggregate bar).
+
+    Returns None — so the caller falls back to Finnhub values — when:
+      - no API key is configured;
+      - the day hasn't settled yet (HTTP 404 / status != "OK"); or
+      - any network/parse error occurs.
+
+    Results are cached per process: a settled day's official OHLC never changes,
+    and a not-yet-settled day is intentionally NOT cached so it is retried.
+    """
+    if not settings.polygon_api_key:
+        return None
+
+    key = (symbol, day)
+    cached = _open_close_cache.get(key)
+    if cached is not None:
+        return cached
+
+    url = _POLYGON_OPEN_CLOSE.format(symbol=symbol, date=day.isoformat())
+    for attempt in range(4):
+        try:
+            r = await _http_client.get(
+                url,
+                params={"adjusted": "true", "apiKey": settings.polygon_api_key},
+            )
+            if r.status_code == 429:
+                wait = 15 * (attempt + 1)
+                logger.info("Polygon open-close 429 for %s, backing off %ds", symbol, wait)
+                await asyncio.sleep(wait)
+                continue
+            # 404 = day not settled yet (normal right after the close). Not an
+            # error — return None so the caller keeps Finnhub's values.
+            if r.status_code == 404:
+                logger.info("Polygon open-close %s %s: not settled yet (404)", symbol, day)
+                return None
+            r.raise_for_status()
+            data = r.json()
+        except Exception as exc:
+            logger.warning("Polygon open-close failed for %s %s (attempt %d): %s",
+                           symbol, day, attempt + 1, exc)
+            if attempt < 3:
+                await asyncio.sleep(2 * (attempt + 1))
+                continue
+            return None
+
+        if data.get("status") != "OK" or "open" not in data or "close" not in data:
+            logger.info("Polygon open-close %s %s: status=%s, not usable",
+                        symbol, day, data.get("status"))
+            return None
+
+        ohlc = OfficialOHLC(
+            date=day,
+            open=float(data.get("open", 0.0)),
+            high=float(data.get("high", 0.0)),
+            low=float(data.get("low", 0.0)),
+            close=float(data.get("close", 0.0)),
+        )
+        _open_close_cache[key] = ohlc
+        logger.info("Polygon open-close %s %s: open=%.2f high=%.2f low=%.2f close=%.2f",
+                    symbol, day, ohlc.open, ohlc.high, ohlc.low, ohlc.close)
+        return ohlc
+
+    return None

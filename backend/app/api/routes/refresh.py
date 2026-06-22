@@ -505,24 +505,30 @@ async def _do_refresh() -> RefreshResponse:
     session_info = get_market_session(now_et)
 
     # Close price swap: after the regular session ends, replace Finnhub's
-    # frozen last-trade values with Polygon's official daily candle. This
-    # gives I1/I2/I3 the authoritative closing auction price, open, and high.
-    # If Polygon's EOD bar hasn't posted yet, Finnhub values serve as stopgap.
+    # frozen last-trade values with Polygon's OFFICIAL regular-session OHLC
+    # (/v1/open-close). This gives I1/I2/I3 the authoritative opening and
+    # closing auction prices — unlike the /v2/aggs daily bar, whose open/close
+    # blend in pre-/post-market trades and skew the open for thin tickers.
+    # If Polygon's EOD data hasn't settled yet (404), Finnhub's frozen official
+    # open and last trade serve as the stopgap.
     if session_info["session"] in ("after_hours", "closed"):
         trading_day = last_trading_day(now_et)
-        for i, snap in enumerate(snapshots):
-            bar = polygon_service.get_cached_bar(snap.symbol, trading_day)
-            if bar and bar.close > 0:
+        official = await asyncio.gather(*[
+            polygon_service.get_official_ohlc(snap.symbol, trading_day)
+            for snap in snapshots
+        ])
+        for i, (snap, oc) in enumerate(zip(snapshots, official)):
+            if oc and oc.close > 0:
                 snapshots[i] = replace(snap,
-                    rt_price=bar.close,
-                    open_price=bar.open,
-                    today_high=bar.high,
-                    today_low=bar.low,
+                    rt_price=oc.close,
+                    open_price=oc.open,
+                    today_high=oc.high,
+                    today_low=oc.low,
                 )
-                logger.info("Close swap %s: Polygon official candle date=%s close=%.2f open=%.2f high=%.2f low=%.2f",
-                            snap.symbol, trading_day, bar.close, bar.open, bar.high, bar.low)
+                logger.info("Close swap %s: Polygon official open-close date=%s close=%.2f open=%.2f high=%.2f low=%.2f",
+                            snap.symbol, trading_day, oc.close, oc.open, oc.high, oc.low)
             else:
-                logger.info("Close swap %s: Polygon bar unavailable for %s, using Finnhub frozen values",
+                logger.info("Close swap %s: Polygon open-close unavailable for %s, using Finnhub frozen values",
                             snap.symbol, trading_day)
 
     # Step 3+4: backfill history + compute indicators for each symbol.
