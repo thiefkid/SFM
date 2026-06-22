@@ -62,6 +62,11 @@ function i3BarColor(value: number): string {
 // Formula builders (tap-to-reveal)
 // ---------------------------------------------------------------------------
 
+function i1Formula(s: StockResult): string | null {
+  if (s.open_price <= 0) return null;
+  return `(${s.rt_price.toFixed(2)} − ${s.open_price.toFixed(2)}) / ${s.open_price.toFixed(2)}`;
+}
+
 function i2Formula(s: StockResult): string | null {
   if (s.prev_close <= 0) return null;
   return `(${s.rt_price.toFixed(2)} − ${s.prev_close.toFixed(2)}) / ${s.prev_close.toFixed(2)}`;
@@ -333,14 +338,16 @@ function IntradayChartModal({
   );
 }
 
-function TappableI1({
+function TappablePrice({
   symbol,
-  value,
+  price,
   open,
+  fontSize,
 }: {
   symbol: string;
-  value: number | null;
+  price: number;
   open: number;
+  fontSize: number;
 }) {
   const [chartOpen, setChartOpen] = useState(false);
   return (
@@ -351,9 +358,9 @@ function TappableI1({
       >
         <span
           className="tabular-nums font-semibold underline decoration-dotted underline-offset-2"
-          style={{ color: pctColor(value), fontSize: 15 }}
+          style={{ color: "var(--text-bright)", fontSize }}
         >
-          {fmtPct(value)}
+          {fmtPrice(price)}
         </span>
       </button>
       {chartOpen && (
@@ -930,18 +937,15 @@ function StockCard({ stock }: { stock: StockResult }) {
             </span>
           )}
         </div>
-        <span
-          className="tabular-nums font-semibold shrink-0"
-          style={{ color: "var(--text-bright)", fontSize: 22 }}
-        >
-          {fmtPrice(stock.rt_price)}
+        <span className="shrink-0">
+          <TappablePrice symbol={stock.symbol} price={stock.rt_price} open={stock.open_price} fontSize={22} />
         </span>
       </div>
 
       {/* I1 / I2 / I3 — tap any value to see formula */}
       <div className="grid grid-cols-3 gap-3">
         <CardStat label="I1 · vs Open">
-          <TappableI1 symbol={stock.symbol} value={stock.i1} open={stock.open_price} />
+          <TappablePct value={stock.i1} formula={i1Formula(stock)} />
         </CardStat>
         <CardStat label="I2 · vs Prev">
           <TappablePct value={stock.i2} formula={i2Formula(stock)} />
@@ -1115,23 +1119,19 @@ export default function CandidatesTable({ stocks }: { stocks: StockResult[] }) {
                 </TD>
 
                 <TD>
-                  <span
-                    className="tabular-nums font-semibold"
-                    style={{
-                      color: "var(--text-bright)",
-                      fontSize: 16,
-                    }}
-                  >
-                    {fmtPrice(stock.rt_price)}
-                  </span>
+                  <TappablePrice
+                    symbol={stock.symbol}
+                    price={stock.rt_price}
+                    open={stock.open_price}
+                    fontSize={16}
+                  />
                 </TD>
 
-                {/* I1 — tap to open intraday chart */}
+                {/* I1 — tap to see formula */}
                 <TD>
-                  <TappableI1
-                    symbol={stock.symbol}
+                  <TappablePct
                     value={stock.i1}
-                    open={stock.open_price}
+                    formula={i1Formula(stock)}
                   />
                 </TD>
 
